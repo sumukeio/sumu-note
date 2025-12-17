@@ -10,7 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import ReactMarkdown from "react-markdown"; 
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 
 import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -18,23 +18,6 @@ import { CSS } from '@dnd-kit/utilities';
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
 }
-
-// --- Markdown 样式 ---
-const markdownComponents = {
-  h1: ({node, ...props}: any) => <h1 className="text-3xl font-bold mt-8 mb-4 border-b border-border/50 pb-2" {...props} />,
-  h2: ({node, ...props}: any) => <h2 className="text-2xl font-bold mt-6 mb-3" {...props} />,
-  h3: ({node, ...props}: any) => <h3 className="text-xl font-bold mt-5 mb-2" {...props} />,
-  p: ({node, ...props}: any) => <p className="mb-4 leading-7 text-muted-foreground" {...props} />,
-  ul: ({node, ...props}: any) => <ul className="list-disc list-inside mb-4 pl-2 space-y-1" {...props} />,
-  ol: ({node, ...props}: any) => <ol className="list-decimal list-inside mb-4 pl-2 space-y-1" {...props} />,
-  blockquote: ({node, ...props}: any) => <blockquote className="border-l-4 border-blue-500/50 pl-4 py-1 italic text-muted-foreground my-4 bg-accent/30 rounded-r" {...props} />,
-  img: ({node, ...props}: any) => <img className="rounded-lg shadow-md my-4 max-w-full" {...props} />,
-  code: ({node, inline, ...props}: any) => 
-    inline 
-      ? <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-sm border border-border text-pink-500" {...props} />
-      : <div className="bg-zinc-950 text-zinc-50 p-4 rounded-lg my-4 overflow-x-auto border border-zinc-800"><code className="font-mono text-sm" {...props} /></div>,
-  a: ({node, ...props}: any) => <a className="text-blue-500 hover:underline font-medium" target="_blank" rel="noopener noreferrer" {...props} />,
-};
 
 interface NoteManagerProps {
   userId: string;
@@ -143,6 +126,14 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [searchQuery, setSearchQuery] = useState("");
   const [showTrash, setShowTrash] = useState(false);
 
+  // --- [[ 自动补全 ---
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const [linkMenuOpen, setLinkMenuOpen] = useState(false);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkInsertStart, setLinkInsertStart] = useState<number | null>(null);
+  const [linkCursorPos, setLinkCursorPos] = useState<number | null>(null);
+  const [linkActiveIndex, setLinkActiveIndex] = useState(0);
+
   // --- 获取数据 ---
   const fetchNotes = async () => { 
       let query = supabase.from('notes')
@@ -211,6 +202,85 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setSaveStatus('unsaved'); 
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); 
       autoSaveTimerRef.current = setTimeout(() => { saveNote(newTitle, newContent, isPinned, isPublished); }, 1500); 
+  };
+
+  // 检测 [[ 触发与查询
+  const handleEditorChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      const cursor = e.target.selectionStart ?? value.length;
+      handleContentChange(title, value);
+
+      // 在光标前寻找最近的 [[ 且尚未闭合 ]]
+      const beforeCursor = value.slice(0, cursor);
+      const start = beforeCursor.lastIndexOf("[[");
+      const endClose = beforeCursor.lastIndexOf("]]");
+
+      if (start !== -1 && (endClose === -1 || endClose < start)) {
+          const rawQuery = beforeCursor.slice(start + 2, cursor);
+          setLinkMenuOpen(true);
+          setLinkQuery(rawQuery.trim());
+          setLinkInsertStart(start);
+          setLinkCursorPos(cursor);
+          setLinkActiveIndex(0);
+      } else {
+          setLinkMenuOpen(false);
+          setLinkQuery("");
+          setLinkInsertStart(null);
+          setLinkCursorPos(null);
+      }
+  };
+
+  // 基于当前文件夹里的 notes 做候选（MVP）
+  const linkCandidates = notes
+      .filter(n => !n.is_deleted)
+      .filter(n => {
+          if (!linkQuery) return true;
+          const q = linkQuery.toLowerCase();
+          return (n.title || "").toLowerCase().includes(q) || (n.content || "").toLowerCase().includes(q);
+      })
+      .slice(0, 20);
+
+  const handleInsertLink = (noteToLink: any) => {
+      if (linkInsertStart == null || linkCursorPos == null) return;
+      const current = content;
+      const before = current.slice(0, linkInsertStart);
+      const after = current.slice(linkCursorPos);
+      const label = noteToLink.title || "未命名笔记";
+      const insertText = `[[${noteToLink.id}|${label}]]`;
+      const nextContent = before + insertText + after;
+      setContent(nextContent);
+      handleContentChange(title, nextContent);
+      setLinkMenuOpen(false);
+      setLinkQuery("");
+      setLinkInsertStart(null);
+      setLinkCursorPos(null);
+
+      // 将光标移到插入链接之后
+      requestAnimationFrame(() => {
+          if (editorRef.current) {
+              const pos = before.length + insertText.length;
+              editorRef.current.focus();
+              editorRef.current.setSelectionRange(pos, pos);
+          }
+      });
+  };
+
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!linkMenuOpen || linkCandidates.length === 0) return;
+
+      if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setLinkActiveIndex((prev) => (prev + 1) % linkCandidates.length);
+      } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setLinkActiveIndex((prev) => (prev - 1 + linkCandidates.length) % linkCandidates.length);
+      } else if (e.key === "Enter") {
+          e.preventDefault();
+          const target = linkCandidates[linkActiveIndex];
+          if (target) handleInsertLink(target);
+      } else if (e.key === "Escape") {
+          setLinkMenuOpen(false);
+      }
   };
   
   const togglePin = async () => {
@@ -317,7 +387,54 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
               </header>
               <div className="flex-1 max-w-3xl mx-auto w-full flex flex-col p-4 md:p-8 overflow-y-auto">
                   <Input value={title} onChange={(e) => handleContentChange(e.target.value, content)} placeholder="无标题" className={cn("text-3xl md:text-4xl font-bold border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto py-4", previewMode && "opacity-80 pointer-events-none")}/>
-                  {previewMode ? (<div className="flex-1 mt-4 animate-in fade-in duration-200"><ReactMarkdown components={markdownComponents}>{content || "*（暂无内容）*"}</ReactMarkdown><div className="h-20" /></div>) : (<Textarea value={content} onChange={(e) => handleContentChange(title, e.target.value)} placeholder="开始输入内容 (支持 Markdown)..." className="flex-1 resize-none border-none shadow-none px-0 focus-visible:ring-0 text-lg leading-relaxed bg-transparent p-0 mt-4 font-sans"/>)}
+                  {previewMode ? (
+                    <div className="flex-1 mt-4 animate-in fade-in duration-200">
+                      <MarkdownRenderer content={content} />
+                      <div className="h-20" />
+                    </div>
+                  ) : (
+                    <div className="relative flex-1 mt-4">
+                      <Textarea
+                        ref={editorRef}
+                        value={content}
+                        onChange={handleEditorChange}
+                        onKeyDown={handleEditorKeyDown}
+                        placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
+                        className="flex-1 resize-none border-none shadow-none px-0 focus-visible:ring-0 text-lg leading-relaxed bg-transparent p-0 font-sans"
+                      />
+                      {linkMenuOpen && linkCandidates.length > 0 && (
+                        <div className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-lg border border-border bg-popover shadow-lg z-10">
+                          <div className="px-3 py-2 border-b border-border/60 text-xs text-muted-foreground">
+                            选择要引用的笔记（↑↓ 选择，Enter 确认）
+                          </div>
+                          <ul className="max-h-64 overflow-y-auto text-sm">
+                            {linkCandidates.map((n, idx) => (
+                              <li
+                                key={n.id}
+                                className={cn(
+                                  "px-3 py-2 cursor-pointer hover:bg-accent",
+                                  idx === linkActiveIndex && "bg-accent"
+                                )}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  handleInsertLink(n);
+                                }}
+                              >
+                                <div className="font-medium truncate">
+                                  {n.title || "未命名笔记"}
+                                </div>
+                                {n.content && (
+                                  <div className="text-xs text-muted-foreground line-clamp-1">
+                                    {n.content}
+                                  </div>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
           </div>
       );

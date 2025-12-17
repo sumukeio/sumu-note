@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link"; // 保留 Link 用于普通跳转，但这里主要用 onClick
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import AuthModal from "@/components/AuthModal"; // 引入刚才写的弹窗
+import { supabase } from "@/lib/supabase";
 
 export default function LandingPage() {
+  const router = useRouter();
   // 控制弹窗状态
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authTab, setAuthTab] = useState<"login" | "register">("login");
@@ -16,6 +18,32 @@ export default function LandingPage() {
     setAuthTab(tab);
     setIsAuthOpen(true);
   };
+
+  // 近期登录过的用户自动跳转到 dashboard（无需再次输入密码）
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkUser = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!cancelled && user) {
+          router.replace("/dashboard");
+        }
+      } catch (e) {
+        // 静默失败，保持在落地页
+        console.warn("Failed to check auth on landing:", e);
+      }
+    };
+
+    checkUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">

@@ -1,18 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
 import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
-import { LogOut, Loader2 } from "lucide-react";
+import { LogOut, Loader2, Download } from "lucide-react";
+import { exportUserNotesToZip } from "@/lib/export-utils";
 
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   // 🔥 状态：当前查看的文件夹 (null 代表看根目录文件夹列表)
   const [currentFolder, setCurrentFolder] = useState<{id: string, name: string} | null>(null);
@@ -32,6 +36,23 @@ export default function DashboardPage() {
     router.replace("/");
   };
 
+  const handleExport = async () => {
+    if (!user?.id || exporting) return;
+    try {
+      setExporting(true);
+      setExportMessage(null);
+      await exportUserNotesToZip(user.id);
+      setExportMessage("导出成功，已下载备份 zip 文件。");
+    } catch (error: any) {
+      console.error(error);
+      setExportMessage(error?.message || "导出失败，请稍后重试。");
+    } finally {
+      setExporting(false);
+      // 3 秒后自动清理提示
+      setTimeout(() => setExportMessage(null), 3000);
+    }
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
   return (
@@ -45,6 +66,30 @@ export default function DashboardPage() {
             Sumu Note
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/dashboard/stats">
+              <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
+                统计
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={exporting}
+              className="flex items-center gap-2"
+            >
+              {exporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  导出中...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  导出备份
+                </>
+              )}
+            </Button>
             <ModeToggle />
             <Button variant="ghost" size="icon" onClick={handleSignOut}><LogOut className="w-5 h-5" /></Button>
           </div>
@@ -53,6 +98,11 @@ export default function DashboardPage() {
 
       {/* 内容区 */}
       <main className="max-w-4xl mx-auto py-8 px-4">
+        {exportMessage && (
+          <div className="mb-4 text-sm text-center text-muted-foreground bg-accent/60 border border-border px-3 py-2 rounded-lg">
+            {exportMessage}
+          </div>
+        )}
         {currentFolder ? (
             // 👀 模式 B: 查看笔记
             <NoteManager 
