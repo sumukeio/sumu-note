@@ -39,6 +39,7 @@ export interface FolderDistributionItem {
   folderId: string | null;
   folderName: string;
   count: number;
+  [key: string]: any; // 添加索引签名以兼容 recharts 的 ChartDataInput 类型
 }
 
 export interface RecentNote {
