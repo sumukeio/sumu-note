@@ -61,7 +61,8 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
           password,
         });
         if (error) throw error;
-        router.push("/dashboard");
+        // 使用 replace 避免历史中保留登录页，提升手机端返回手势体验
+        router.replace("/dashboard");
         onClose();
 
       } else {

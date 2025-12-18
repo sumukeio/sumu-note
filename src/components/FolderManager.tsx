@@ -22,6 +22,10 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [targetFolders, setTargetFolders] = useState<any[]>([]); 
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editMode, setEditMode] = useState<"create" | "rename">("create");
+  const [editingFolder, setEditingFolder] = useState<any | null>(null);
+  const [folderNameInput, setFolderNameInput] = useState("");
 
   const isSelectionMode = selectedIds.size > 0;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -36,10 +40,10 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   useEffect(() => { if (userId) fetchFolders(); }, [userId]);
 
   const handleCreateFolder = async () => {
-    const name = prompt("新建文件夹名称：");
-    if (!name) return;
-    const { error } = await supabase.from('folders').insert({ user_id: userId, name });
-    if (!error) fetchFolders();
+    setEditMode("create");
+    setEditingFolder(null);
+    setFolderNameInput("");
+    setIsEditDialogOpen(true);
   };
 
   const toggleSelection = (id: string) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet); };
@@ -82,19 +86,43 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
     const folder = folders.find(f => f.id === id);
     if (!folder) return;
 
-    const newName = prompt("重命名文件夹：", folder.name);
-    if (!newName || newName === folder.name) return;
+    setEditMode("rename");
+    setEditingFolder(folder);
+    setFolderNameInput(folder.name || "");
+    setIsEditDialogOpen(true);
+  };
 
-    const { error } = await supabase
-        .from('folders')
-        .update({ name: newName })
-        .eq('id', id);
+  const handleSaveFolder = async () => {
+    const name = folderNameInput.trim();
+    if (!name) return;
 
-    if (!error) {
-        fetchFolders(); // 刷新
-        exitSelectionMode(); // 退出多选
-    } else {
+    if (editMode === "create") {
+      const { error } = await supabase
+        .from("folders")
+        .insert({ user_id: userId, name });
+      if (!error) {
+        setIsEditDialogOpen(false);
+        setFolderNameInput("");
+        fetchFolders();
+      }
+    } else if (editMode === "rename" && editingFolder) {
+      if (name === editingFolder.name) {
+        setIsEditDialogOpen(false);
+        return;
+      }
+      const { error } = await supabase
+        .from("folders")
+        .update({ name })
+        .eq("id", editingFolder.id);
+
+      if (!error) {
+        setIsEditDialogOpen(false);
+        setFolderNameInput("");
+        fetchFolders();
+        exitSelectionMode();
+      } else {
         alert("重命名失败");
+      }
     }
   };
 
@@ -154,6 +182,42 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
                     </Button>
                 ))}
             </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新建 / 重命名 文件夹弹窗 */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>
+              {editMode === "create" ? "新建文件夹" : "重命名文件夹"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <input
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              placeholder="输入文件夹名称"
+              value={folderNameInput}
+              onChange={(e) => setFolderNameInput(e.target.value)}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsEditDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveFolder}
+                disabled={!folderNameInput.trim()}
+              >
+                确定
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

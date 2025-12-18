@@ -8,7 +8,8 @@ import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
 import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
-import { LogOut, Loader2, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { LogOut, Loader2, Download, Search } from "lucide-react";
 import { exportUserNotesToZip } from "@/lib/export-utils";
 
 export default function DashboardPage() {
@@ -20,6 +21,9 @@ export default function DashboardPage() {
 
   // 🔥 状态：当前查看的文件夹 (null 代表看根目录文件夹列表)
   const [currentFolder, setCurrentFolder] = useState<{id: string, name: string} | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -34,6 +38,34 @@ export default function DashboardPage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.replace("/");
+  };
+
+  const handleGlobalSearchChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    if (!value.trim() || !user?.id) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    const q = `%${value.trim()}%`;
+    const { data, error } = await supabase
+      .from("notes")
+      .select("id, title, content, folder_id, updated_at, tags")
+      .eq("user_id", user.id)
+      .or(`title.ilike.${q},content.ilike.${q},tags.ilike.${q}`);
+
+    if (error) {
+      console.error(error);
+      setSearchResults([]);
+    } else {
+      setSearchResults(data || []);
+    }
+    setSearching(false);
   };
 
   const handleExport = async () => {
@@ -60,12 +92,25 @@ export default function DashboardPage() {
       
       {/* 导航栏 */}
       <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 font-bold text-lg">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-sm">S</div>
-            Sumu Note
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 font-bold text-lg shrink-0">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-sm">
+              S
+            </div>
+            <span className="hidden sm:inline">Sumu Note</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex-1 max-w-md hidden sm:flex items-center">
+            <div className="relative w-full">
+              <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-2.5" />
+              <Input
+                placeholder="全局搜索标题或内容..."
+                value={searchQuery}
+                onChange={handleGlobalSearchChange}
+                className="pl-9 h-9 bg-accent/40 border-none"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
             <Link href="/dashboard/stats">
               <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
                 统计
@@ -91,7 +136,9 @@ export default function DashboardPage() {
               )}
             </Button>
             <ModeToggle />
-            <Button variant="ghost" size="icon" onClick={handleSignOut}><LogOut className="w-5 h-5" /></Button>
+            <Button variant="ghost" size="icon" onClick={handleSignOut}>
+              <LogOut className="w-5 h-5" />
+            </Button>
           </div>
         </div>
       </nav>
@@ -103,20 +150,68 @@ export default function DashboardPage() {
             {exportMessage}
           </div>
         )}
-        {currentFolder ? (
-            // 👀 模式 B: 查看笔记
-            <NoteManager 
-                userId={user.id} 
-                folderId={currentFolder.id} 
-                folderName={currentFolder.name}
-                onBack={() => setCurrentFolder(null)} // 返回到文件夹列表
-            />
+        {searchQuery.trim() ? (
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                <Search className="w-4 h-4" />
+                搜索结果
+              </h2>
+              {searching && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  搜索中...
+                </span>
+              )}
+            </div>
+            {searchResults.length === 0 && !searching ? (
+              <p className="text-xs text-muted-foreground">
+                没有找到与 “{searchQuery}” 相关的笔记。
+              </p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {searchResults.map((note) => (
+                  <li
+                    key={note.id}
+                    className="rounded-lg border border-border bg-card/60 px-3 py-2 cursor-pointer hover:bg-accent/60 transition-colors"
+                    onClick={() =>
+                      router.push(`/notes/${encodeURIComponent(note.id)}`)
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-medium truncate">
+                        {note.title || "未命名笔记"}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                        {note.updated_at
+                          ? new Date(note.updated_at).toLocaleDateString()
+                          : ""}
+                      </span>
+                    </div>
+                    {note.content && (
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {note.content}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : currentFolder ? (
+          // 👀 模式 B: 查看笔记
+          <NoteManager
+            userId={user.id}
+            folderId={currentFolder.id}
+            folderName={currentFolder.name}
+            onBack={() => setCurrentFolder(null)} // 返回到文件夹列表
+          />
         ) : (
-            // 👀 模式 A: 查看文件夹列表 (默认)
-            <FolderManager 
-                userId={user.id} 
-                onEnterFolder={(id, name) => setCurrentFolder({ id, name })} 
-            />
+          // 👀 模式 A: 查看文件夹列表 (默认)
+          <FolderManager
+            userId={user.id}
+            onEnterFolder={(id, name) => setCurrentFolder({ id, name })}
+          />
         )}
       </main>
 

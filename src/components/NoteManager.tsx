@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { 
   Copy, Trash2, FolderInput, X, Check, Loader2, Plus, 
   FileText, ArrowLeft, CheckCircle2, Pencil, Eye, PenLine, 
-  Search, RotateCcw, Pin, Image as ImageIcon, Globe // 🔥 确保引入 Pin
+  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2
 } from "lucide-react"; 
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,10 @@ type SaveStatus = 'saved' | 'saving' | 'error' | 'unsaved';
 // --- 拖拽卡片组件 ---
 function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouchStart, onTouchEnd, onTouchMove, onMouseDown, onMouseUp }: any) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-        id: note.id, data: note, disabled: !isSelectionMode
+        id: note.id,
+        data: note,
+        // 始终允许拖拽，具体操作依赖于 selectedIds 和 Dock
+        disabled: false,
     });
     const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0 : 1 };
     
@@ -58,6 +61,23 @@ function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouch
                 <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">
                     {note.content || "点击编辑内容..."}
                 </p>
+                {/* 标签预览 */}
+                {((note as any).tags as string | null | undefined) && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {((note as any).tags as string)
+                      .split(",")
+                      .map((t) => t.trim())
+                      .filter(Boolean)
+                      .map((t) => (
+                        <span
+                          key={t}
+                          className="px-1.5 py-0.5 rounded-full bg-accent/60 text-[10px] text-accent-foreground"
+                        >
+                          #{t}
+                        </span>
+                      ))}
+                  </div>
+                )}
             </div>
             <div className="flex justify-between items-center mt-2">
                 <span className="text-[10px] text-muted-foreground">{new Date(note.updated_at).toLocaleDateString()}</span>
@@ -107,6 +127,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [currentNote, setCurrentNote] = useState<any>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
+  // 撤回栈：记录之前的编辑状态（多步撤回）
+  const [undoStack, setUndoStack] = useState<{ title: string; content: string }[]>([]);
+  const lastChangeTimeRef = useRef<number | null>(null);
+  const [zenMode, setZenMode] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [isPinned, setIsPinned] = useState(false);
@@ -160,7 +186,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const filteredNotes = notes.filter(note => {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
-      return (note.title?.toLowerCase() || "").includes(q) || (note.content?.toLowerCase() || "").includes(q);
+      const noteTags = ((note as any).tags as string | null | undefined)
+        ?.split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean) || [];
+      return (
+        (note.title?.toLowerCase() || "").includes(q) ||
+        (note.content?.toLowerCase() || "").includes(q) ||
+        noteTags.some((t) => t.includes(q))
+      );
   });
   
   // --- 编辑器操作 ---
@@ -168,6 +202,20 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setCurrentNote(note); 
       setTitle(note.title || ""); 
       setContent(note.content || ""); 
+      // 解析 tags 字段（假设为以逗号分隔的字符串）
+      const rawTags = (note as any).tags as string | null | undefined;
+      if (rawTags) {
+        setTags(
+          rawTags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+        );
+      } else {
+        setTags([]);
+      }
+      // 初始化撤回栈：清空历史
+      setUndoStack([]);
       setIsPinned(note.is_pinned || false); 
       setIsPublished(note.is_published || false);
       setSaveStatus('saved'); 
@@ -177,7 +225,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   const handleAddNote = async () => { const { data } = await supabase.from('notes').insert({ user_id: userId, folder_id: folderId, title: "", content: "" }).select().single(); if (data) enterEditor(data); };
   
-  const saveNote = useCallback(async (currentTitle: string, currentContent: string, pinned: boolean, published: boolean) => { 
+  const saveNote = useCallback(async (currentTitle: string, currentContent: string, pinned: boolean, published: boolean, currentTags: string[]) => { 
       if (!currentNote) return; 
       setSaveStatus('saving'); 
       const now = new Date(); 
@@ -186,22 +234,76 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           finalTitle = currentContent.split('\n')[0]?.replace(/[#*`]/g, '').trim().slice(0, 30) || "";
           setTitle(finalTitle); 
       }
-      const { error } = await supabase.from('notes').update({ 
-          title: finalTitle, 
-          content: currentContent, 
+      // 首次尝试：包含 tags 字段
+      let { error } = await supabase
+        .from("notes")
+        .update({
+          title: finalTitle,
+          content: currentContent,
           is_pinned: pinned,
           is_published: published,
-          updated_at: now.toISOString() 
-      }).eq('id', currentNote.id); 
-      if (!error) { setSaveStatus('saved'); } else { setSaveStatus('error'); } 
+          // 标签作为逗号分隔字符串持久化到 tags 字段（需要在数据库中添加该列）
+          tags: currentTags.join(","),
+          updated_at: now.toISOString(),
+        })
+        .eq("id", currentNote.id);
+
+      // 如果后端还没有 tags 字段，降级为不更新 tags，避免整条更新失败
+      if (error && typeof error.message === "string" && error.message.includes("column") && error.message.includes("tags")) {
+        console.warn("[NoteManager] notes.tags 列不存在，将在无标签模式下保存笔记。");
+        const retry = await supabase
+          .from("notes")
+          .update({
+            title: finalTitle,
+            content: currentContent,
+            is_pinned: pinned,
+            is_published: published,
+            updated_at: now.toISOString(),
+          })
+          .eq("id", currentNote.id);
+        error = retry.error;
+      }
+
+      if (!error) {
+        setSaveStatus("saved");
+      } else {
+        console.error("[NoteManager] 保存笔记失败：", error.message || error);
+        setSaveStatus("error");
+      }
   }, [currentNote]);
 
   const handleContentChange = (newTitle: string, newContent: string) => { 
+      const now = Date.now();
+      const prevTitle = title;
+      const prevContent = content;
+
+      // 如果距离上一次变更超过一定时间（例如 800ms），认为是一次新的“编辑操作”，
+      // 将变更前的状态推入撤回栈，这样撤回会回到本次编辑前的版本。
+      const timeSinceLast =
+        lastChangeTimeRef.current != null ? now - lastChangeTimeRef.current : Infinity;
+
+      if (timeSinceLast > 800) {
+        setUndoStack((prev) => {
+          const snapshot = { title: prevTitle, content: prevContent };
+          const last = prev[prev.length - 1];
+          // 避免重复快照
+          if (last && last.title === snapshot.title && last.content === snapshot.content) {
+            return prev;
+          }
+          // 限制最多保留 50 步撤回
+          const next = [...prev, snapshot];
+          return next.slice(-50);
+        });
+      }
+
+      lastChangeTimeRef.current = now;
+
       setTitle(newTitle); 
       setContent(newContent); 
       setSaveStatus('unsaved'); 
+
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); 
-      autoSaveTimerRef.current = setTimeout(() => { saveNote(newTitle, newContent, isPinned, isPublished); }, 1500); 
+      autoSaveTimerRef.current = setTimeout(() => { saveNote(newTitle, newContent, isPinned, isPublished, tags); }, 1500); 
   };
 
   // 检测 [[ 触发与查询
@@ -324,7 +426,48 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
   };
 
-  useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (view === 'editor') saveNote(title, content, isPinned, isPublished); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [view, title, content, isPinned, isPublished, saveNote]);
+  useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (view === 'editor') saveNote(title, content, isPinned, isPublished, tags); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [view, title, content, isPinned, isPublished, tags, saveNote]);
+
+  // 手机端返回手势（后退）先关闭编辑器，再返回到登录页
+  useEffect(() => {
+    if (view !== "editor") return;
+
+    const handlePopState = () => {
+      // 仅关闭编辑器，保持在 dashboard（文件夹页）
+      setView("list");
+      fetchNotes();
+    };
+
+    // 在编辑器打开时插入一个新的历史记录条目
+    if (typeof window !== "undefined") {
+      window.history.pushState({ noteEditor: true }, "", window.location.href);
+      window.addEventListener("popstate", handlePopState);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("popstate", handlePopState);
+      }
+    };
+  }, [view]);
+
+  // 撤回到上次保存版本
+  const canRevert = view === "editor" && undoStack.length > 0;
+
+  const handleRevertToLastSaved = async () => {
+    if (!canRevert) return;
+    setUndoStack((prev) => {
+      const next = [...prev];
+      const snapshot = next.pop();
+      if (snapshot) {
+        setTitle(snapshot.title);
+        setContent(snapshot.content);
+        // 撤回后也触发一次保存，保证与服务端一致
+        saveNote(snapshot.title, snapshot.content, isPinned, isPublished, tags);
+      }
+      return next;
+    });
+  };
 
   // --- 交互逻辑 ---
   const toggleSelection = (id: string) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet); };
@@ -370,23 +513,118 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   if (view === 'editor') {
       return (
-          <div className="fixed inset-0 bg-background z-50 flex flex-col animate-in slide-in-from-bottom-4 duration-300">
-              <header className="px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur">
+          <div className={cn("fixed inset-0 bg-background z-50 flex flex-col animate-in slide-in-from-bottom-4 duration-300", zenMode && "bg-background")}>
+              <header className={cn(
+                "px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur",
+                zenMode && "bg-background border-b border-border/40"
+              )}>
                   <div className="flex items-center gap-2">
                     <Button variant="ghost" className="-ml-2 text-muted-foreground hover:text-foreground" onClick={() => { if (saveStatus === 'unsaved') saveNote(title, content, isPinned, isPublished); setView('list'); fetchNotes(); }}><ArrowLeft className="w-5 h-5 mr-1" />返回</Button>
                   </div>
                   <div className="flex items-center gap-1">
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
-                      <Button variant="ghost" size="icon" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
-                      <Button variant="ghost" size="icon" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
-                      <Button variant="ghost" size="icon" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
+                      {!zenMode && (
+                        <>
+                          <Button variant="ghost" size="icon" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
+                          <Button variant="ghost" size="icon" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
+                          <Button variant="ghost" size="icon" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
+                          <div className="w-[1px] h-4 bg-border mx-1"></div>
+                        </>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!canRevert}
+                        onClick={handleRevertToLastSaved}
+                        className={cn(
+                          "px-2 text-xs flex items-center gap-1",
+                          !canRevert && "opacity-40 cursor-not-allowed"
+                        )}
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        撤回
+                      </Button>
                       <div className="w-[1px] h-4 bg-border mx-1"></div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={zenMode ? "退出专注模式" : "进入专注模式"}
+                        onClick={() => setZenMode((v) => !v)}
+                      >
+                        {zenMode ? (
+                          <Minimize2 className="w-4 h-4 text-muted-foreground" />
+                        ) : (
+                          <Maximize2 className="w-4 h-4 text-muted-foreground" />
+                        )}
+                      </Button>
                       <button onClick={() => setPreviewMode(!previewMode)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={14}/> 编辑</> : <><Eye size={14}/> 预览</>}</button>
                       <div className="text-xs text-muted-foreground w-12 text-right">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
                   </div>
               </header>
-              <div className="flex-1 max-w-3xl mx-auto w-full flex flex-col p-4 md:p-8 overflow-y-auto">
-                  <Input value={title} onChange={(e) => handleContentChange(e.target.value, content)} placeholder="无标题" className={cn("text-3xl md:text-4xl font-bold border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto py-4", previewMode && "opacity-80 pointer-events-none")}/>
+              <div className={cn(
+                "flex-1 mx-auto w-full flex flex-col p-4 md:p-8 overflow-y-auto",
+                zenMode ? "max-w-5xl" : "max-w-3xl"
+              )}>
+                  <Input
+                    value={title}
+                    onChange={(e) => handleContentChange(e.target.value, content)}
+                    placeholder="无标题"
+                    className={cn(
+                      "text-3xl md:text-4xl font-bold border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto py-4",
+                      previewMode && "opacity-80 pointer-events-none"
+                    )}
+                  />
+                  {/* 标签编辑区域 */}
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    {tags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className="flex items-center gap-1 rounded-full bg-accent text-accent-foreground px-2 py-0.5 text-xs hover:bg-accent/80"
+                        onClick={() => {
+                          setTags((prev) => {
+                            const arr = prev.filter((t) => t !== tag);
+                            if (autoSaveTimerRef.current)
+                              clearTimeout(autoSaveTimerRef.current);
+                            autoSaveTimerRef.current = setTimeout(() => {
+                              saveNote(title, content, isPinned, isPublished, arr);
+                            }, 1500);
+                            return arr;
+                          });
+                        }}
+                      >
+                        <span>#{tag}</span>
+                        <X className="w-3 h-3" />
+                      </button>
+                    ))}
+                      <input
+                      className="min-w-[80px] flex-1 bg-transparent border-none outline-none text-xs text-muted-foreground placeholder:text-muted-foreground/70"
+                      placeholder={tags.length === 0 ? "添加标签，回车确认（例如：#项目 / #想法）" : "继续添加标签..."}
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const raw = tagInput.trim();
+                          if (!raw) return;
+                          const parts = raw.split(/[，,]/).map((p) => p.trim());
+                          setTags((prev) => {
+                            const next = new Set(prev);
+                            parts.forEach((p) => p && next.add(p));
+                            const arr = Array.from(next);
+                            // 标签变动后也触发一次保存（复用自动保存 debounce）
+                            if (autoSaveTimerRef.current)
+                              clearTimeout(autoSaveTimerRef.current);
+                            autoSaveTimerRef.current = setTimeout(() => {
+                              saveNote(title, content, isPinned, isPublished, arr);
+                            }, 1500);
+                            return arr;
+                          });
+                          setTagInput("");
+                        }
+                      }}
+                    />
+                  </div>
                   {previewMode ? (
                     <div className="flex-1 mt-4 animate-in fade-in duration-200">
                       <MarkdownRenderer content={content} />
@@ -400,7 +638,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         onChange={handleEditorChange}
                         onKeyDown={handleEditorKeyDown}
                         placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
-                        className="flex-1 resize-none border-none shadow-none px-0 focus-visible:ring-0 text-lg leading-relaxed bg-transparent p-0 font-sans"
+                        className="min-h-[220px] max-h-[70vh] resize-none border-none shadow-none px-0 focus-visible:ring-0 text-lg leading-relaxed bg-transparent p-0 font-sans"
                       />
                       {linkMenuOpen && linkCandidates.length > 0 && (
                         <div className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-lg border border-border bg-popover shadow-lg z-10">
