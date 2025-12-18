@@ -1,92 +1,220 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SumuNote
 
-## SumuNote Features (最近更新)
+> 极简主义者的个人知识管理系统 - 不仅是笔记，更是你的第二大脑
 
-### 双向链接（Wiki-style Links）
+SumuNote 是一个现代化的 Web 笔记应用，专注于极简设计、流畅体验和强大的知识管理能力。支持双向链接、Markdown 编辑、文件夹组织、数据统计等功能，让笔记管理变得简单而高效。
 
-- **Markdown 双向链接语法**
-  - 支持 `[[笔记标题]]` 和 `[[noteId|显示名称]]` 语法。
-  - 通过 `src/components/MarkdownRenderer.tsx` 进行统一解析渲染：
-    - 将 `[[...]]` 转换为内部链接 `/notes/[id or title]`。
-    - 内部链接使用极简高亮样式（`bg-blue-50 text-blue-600`），点击后跳转到对应笔记详情页。
+## ✨ 核心功能
 
-- **笔记详情页 & Backlinks**
-  - 新增 `src/app/notes/[id]/page.tsx`：
-    - 支持通过笔记 `id` 或标题访问单篇笔记。
-    - 使用 `MarkdownRenderer` 渲染笔记正文。
-    - 底部新增 **Backlinks** 区域：
-      - 使用 Supabase 在 `notes.content` 上执行 `ILIKE` 模糊查询，查找包含 `[[当前笔记 id...` 或 `[[当前笔记标题]]` 的笔记。
-      - 展示引用当前笔记的其他笔记列表 + 一小段上下文预览（Context Snippet）。
+### 📝 笔记管理
+- **Markdown 编辑器**：实时预览、语法高亮、自动保存
+- **文件夹组织**：多层级文件夹管理，清晰分类
+- **笔记操作**：创建、编辑、删除、复制、重命名、置顶
+- **图片上传**：支持图片上传到 Supabase Storage
+- **发布分享**：一键发布笔记到 Web，生成公开链接
 
-### 编辑体验：`[[` 自动补全
+### 🔗 双向链接（Wiki-style Links）
+- **Markdown 链接语法**：支持 `[[笔记标题]]` 和 `[[noteId|显示名称]]` 语法
+- **自动链接渲染**：`[[...]]` 自动转换为可点击的内部链接
+- **反向链接（Backlinks）**：自动追踪哪些笔记引用了当前笔记，并显示上下文预览
+- **自动补全**：输入 `[[` 时触发智能补全，快速插入笔记链接
 
-- 在 `src/components/NoteManager.tsx` 的编辑器模式中：
-  - 当用户在内容中输入 `[[` 时：
-    - 触发简易自动补全浮层，候选来源为当前文件夹内的笔记列表。
-    - 支持根据后续输入对笔记标题 / 内容做模糊过滤。
-  - 键盘交互：
-    - `↑ / ↓`：移动选中项。
-    - `Enter`：插入当前选中笔记的链接。
-    - `Esc`：关闭自动补全。
-  - 插入格式：
-    - 选中后自动插入 `[[noteId|title]]`，确保即使标题变更，仍能通过 `id` 唯一定位目标笔记。
+### 📊 数据统计
+- **写作热力图**：可视化展示一年内的写作活跃度
+- **统计仪表盘**：总笔记数、本周新增、总字数、活跃天数等
+- **文件夹分布**：饼图展示不同文件夹的笔记分布情况
+- **最近编辑**：快速访问最近更新的笔记
 
-### 自动登录（Session Persistence）
+### 🎨 用户体验
+- **拖拽交互**：支持拖拽笔记进行批量操作（删除、复制、置顶等）
+- **多选模式**：长按或点击进入多选模式，批量管理笔记
+- **搜索功能**：支持按标题和内容搜索笔记
+- **回收站**：删除的笔记可恢复，支持彻底删除
+- **暗色模式**：支持亮色/暗色主题切换
 
-- **近期登录用户免密自动登录**
-  - 在 `src/app/page.tsx` 中实现：
-    - 页面加载时自动调用 `supabase.auth.getUser()` 检查是否存在有效会话。
-    - 如果检测到用户已登录（Supabase 的 session / refresh token 仍有效），自动跳转到 `/dashboard`，无需用户再次输入密码。
-  - **技术原理**：
-    - Supabase JS SDK 会自动从浏览器本地存储（localStorage / IndexedDB）中恢复登录状态。
-    - 只要用户之前成功登录过，且会话未过期（或可通过 refresh token 刷新），下次访问网站即可自动登录。
-  - **用户体验**：
-    - 已登录用户访问首页时，会无缝跳转到仪表盘，提升使用流畅度。
-    - 未登录或会话已过期的用户，仍会看到原有的登录/注册界面。
+### 🔐 身份认证
+- **邮箱密码登录**：传统邮箱+密码登录/注册
+- **OAuth 登录**：支持 Google 和 Apple 一键登录
+- **自动登录**：近期登录用户自动恢复会话，无需重复输入密码
+- **会话持久化**：Supabase 自动管理 session，保持登录状态
 
-### Bug 修复记录
+### 💾 数据管理
+- **数据导出**：支持导出所有笔记为 ZIP 文件备份
+- **云端同步**：基于 Supabase 的实时数据同步
+- **数据安全**：企业级数据存储，用户数据私有化
 
-- **Next.js 动态路由参数使用方式**
-  - 修复了 `src/app/notes/[id]/page.tsx` 中直接访问 `params.id` 导致的报错：
-    - 现在使用 `useParams<{ id: string }>()` 获取动态路由参数，避免 `params` 作为 Promise 导致的运行时错误。
+## 🛠️ 技术栈
 
-- **Markdown 渲染中的 HTML 结构问题**
-  - 之前的 Markdown `code` 渲染器在块级代码块中返回 `<div><code>...</code></div>`：
-    - 当被包裹在 `<p>` 内部时会产生 “`<div> cannot be a descendant of <p>`” 的 hydration 报错。
-  - 现已调整为：
-    - 非行内代码渲染为单个块级 `<code>` 元素（`display: block`），避免在 `<p>` 里嵌套 `<div>`，消除结构与 hydration 警告。
+### 前端框架
+- **[Next.js 16](https://nextjs.org/)** - React 框架，App Router
+- **[React 19](https://react.dev/)** - UI 库
+- **[TypeScript](https://www.typescriptlang.org/)** - 类型安全
 
-## Getting Started
+### 样式与 UI
+- **[Tailwind CSS 4](https://tailwindcss.com/)** - 实用优先的 CSS 框架
+- **[Radix UI](https://www.radix-ui.com/)** - 无样式、可访问的 UI 组件
+- **[Lucide React](https://lucide.dev/)** - 图标库
+- **[next-themes](https://github.com/pacocoursey/next-themes)** - 主题切换
 
-First, run the development server:
+### 后端与数据库
+- **[Supabase](https://supabase.com/)** - 后端即服务（BaaS）
+  - PostgreSQL 数据库
+  - 身份认证（Auth）
+  - 对象存储（Storage）
+
+### 功能库
+- **[react-markdown](https://github.com/remarkjs/react-markdown)** - Markdown 渲染
+- **[recharts](https://recharts.org/)** - 数据可视化图表
+- **[@dnd-kit/core](https://dndkit.com/)** - 拖拽交互
+- **[date-fns](https://date-fns.org/)** - 日期处理
+- **[jszip](https://stuk.github.io/jszip/)** + **[file-saver](https://github.com/eligrey/FileSaver.js/)** - 数据导出
+
+### 开发工具
+- **[Vitest](https://vitest.dev/)** - 测试框架
+- **[ESLint](https://eslint.org/)** - 代码检查
+- **[Testing Library](https://testing-library.com/)** - React 组件测试
+
+## 📦 项目结构
+
+```
+sumu-note/
+├── src/
+│   ├── app/                    # Next.js App Router 页面
+│   │   ├── page.tsx           # 首页（登录页）
+│   │   ├── dashboard/         # 仪表盘
+│   │   ├── notes/[id]/        # 笔记详情页
+│   │   └── auth/callback/     # OAuth 回调
+│   ├── components/            # React 组件
+│   │   ├── AuthModal.tsx      # 登录/注册弹窗
+│   │   ├── FolderManager.tsx  # 文件夹管理
+│   │   ├── NoteManager.tsx    # 笔记管理
+│   │   ├── MarkdownRenderer.tsx # Markdown 渲染（支持双向链接）
+│   │   └── ui/                # UI 基础组件
+│   └── lib/                   # 工具函数
+│       ├── supabase.ts        # Supabase 客户端
+│       ├── stats.ts           # 统计数据逻辑
+│       └── export-utils.ts    # 导出功能
+├── tests/                     # 测试文件
+└── public/                    # 静态资源
+```
+
+## 🚀 快速开始
+
+### 环境要求
+- Node.js 18+ 
+- npm / yarn / pnpm / bun
+
+### 安装依赖
+
+```bash
+npm install
+# 或
+yarn install
+# 或
+pnpm install
+```
+
+### 环境变量配置
+
+在项目根目录创建 `.env.local` 文件：
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### 运行开发服务器
 
 ```bash
 npm run dev
-# or
+# 或
 yarn dev
-# or
+# 或
 pnpm dev
-# or
+# 或
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开 [http://localhost:3000](http://localhost:3000) 查看应用。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 构建生产版本
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+### 运行测试
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm test              # 运行测试
+npm test:ui          # 测试 UI
+npm test:coverage    # 测试覆盖率
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🌐 部署
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Vercel（推荐）
 
-## Deploy on Vercel
+1. 将代码推送到 GitHub
+2. 在 [Vercel](https://vercel.com) 导入项目
+3. 配置环境变量（`NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY`）
+4. 部署完成
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 其他平台
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+项目基于 Next.js，可以部署到任何支持 Node.js 的平台：
+- Netlify
+- Railway
+- Render
+- 自建服务器
+
+## 📝 最近更新
+
+### 🔐 OAuth 登录支持
+- **Google 登录**：一键使用 Google 账号登录/注册
+- **Apple 登录**：支持 Apple ID 登录（需配置）
+- **登录体验优化**：保留密码登录的同时，提供更便捷的第三方登录选项
+
+### 🔗 双向链接系统
+- **Wiki-style 链接语法**：支持 `[[笔记标题]]` 和 `[[noteId|显示名称]]`
+- **反向链接（Backlinks）**：自动展示引用当前笔记的其他笔记列表
+- **智能自动补全**：输入 `[[` 时触发笔记标题补全，支持模糊搜索
+
+### 🔄 自动登录
+- **会话持久化**：近期登录用户访问时自动恢复登录状态
+- **无需重复输入**：Supabase 自动管理 session，提升用户体验
+
+### 🐛 Bug 修复
+- 修复 Next.js 14 动态路由参数使用方式
+- 修复 Markdown 渲染中的 HTML 结构问题（hydration 错误）
+- 修复 Vercel 构建时的类型错误和 Suspense 边界问题
+
+## 🔧 配置 OAuth 登录
+
+### Google OAuth 配置
+
+1. 在 [Google Cloud Console](https://console.cloud.google.com/) 创建 OAuth 2.0 客户端 ID
+2. 配置重定向 URI：`https://你的项目ID.supabase.co/auth/v1/callback`
+3. 在 Supabase Dashboard → Authentication → Providers → Google 中启用并填入 Client ID 和 Secret
+
+详细配置步骤请查看项目文档或 Supabase 官方文档。
+
+### Apple OAuth 配置
+
+1. 需要 Apple Developer 账号（$99/年）
+2. 在 Apple Developer 创建 App ID 和 Service ID
+3. 配置回调 URL
+4. 在 Supabase Dashboard 中启用 Apple Provider 并填入凭据
+
+## 📄 许可证
+
+本项目为私有项目。
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+---
+
+**Built with ❤️ using Next.js and Supabase**
