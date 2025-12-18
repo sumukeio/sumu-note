@@ -1,0 +1,29 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    # 每天 UTC 时间 00:00 运行一次 (北京时间早上8点)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允许你手动点击按钮触发测试
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          # 向 REST API 根目录发送请求
+          # 这会触发 Supabase 的 API 网关，算作“活跃”活动
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X GET '${{ secrets.SUPABASE_URL }}/rest/v1/' \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          
+          echo "Supabase responded with status: $response"
+          
+          # 只要有响应（哪怕是404或空列表），就说明服务器唤醒了
+          if [ "$response" -ge 200 ] && [ "$response" -lt 500 ]; then
+            echo "Success! Supabase is active."
+          else
+            echo "Warning: Received unexpected status code."
+            # 不让 workflow 失败，只要请求发出去了就行
+          fi
