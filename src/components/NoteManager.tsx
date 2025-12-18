@@ -519,7 +519,20 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                 zenMode && "bg-background border-b border-border/40"
               )}>
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" className="-ml-2 text-muted-foreground hover:text-foreground" onClick={() => { if (saveStatus === 'unsaved') saveNote(title, content, isPinned, isPublished); setView('list'); fetchNotes(); }}><ArrowLeft className="w-5 h-5 mr-1" />返回</Button>
+                    <Button
+                      variant="ghost"
+                      className="-ml-2 text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        if (saveStatus === "unsaved") {
+                          saveNote(title, content, isPinned, isPublished, tags);
+                        }
+                        setView("list");
+                        fetchNotes();
+                      }}
+                    >
+                      <ArrowLeft className="w-5 h-5 mr-1" />
+                      返回
+                    </Button>
                   </div>
                   <div className="flex items-center gap-1">
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
