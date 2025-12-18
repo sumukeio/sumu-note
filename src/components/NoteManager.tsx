@@ -388,13 +388,13 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const togglePin = async () => {
       const newStatus = !isPinned;
       setIsPinned(newStatus);
-      await saveNote(title, content, newStatus, isPublished);
+      await saveNote(title, content, newStatus, isPublished, tags);
   };
 
   const togglePublish = async () => {
       const newStatus = !isPublished;
       setIsPublished(newStatus);
-      await saveNote(title, content, isPinned, newStatus);
+      await saveNote(title, content, isPinned, newStatus, tags);
       if (newStatus) {
           const url = `${window.location.origin}/p/${currentNote.id}`;
           navigator.clipboard.writeText(url);

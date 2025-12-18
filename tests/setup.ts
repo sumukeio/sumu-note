@@ -23,30 +23,37 @@ vi.mock('next/navigation', () => ({
 }));
 
 // Mock Supabase client
-vi.mock('@/lib/supabase', () => ({
-  supabase: {
+vi.mock('@/lib/supabase', () => {
+  // 通用的 query mock，对所有链式方法返回同一个对象，避免 .order(...).order(...) 类型错误
+  const createQueryMock = () => {
+    const query: any = {};
+    query.select = vi.fn(() => query);
+    query.insert = vi.fn(() => query);
+    query.update = vi.fn(() => query);
+    query.delete = vi.fn(() => query);
+    query.eq = vi.fn(() => query);
+    query.or = vi.fn(() => query);
+    query.order = vi.fn(() => query);
+    query.in = vi.fn(() => query);
+    query.single = vi.fn();
+    return query;
+  };
+
+  const supabaseMock = {
     auth: {
       getUser: vi.fn(),
       signInWithPassword: vi.fn(),
       signUp: vi.fn(),
       signOut: vi.fn(),
     },
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      or: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      in: vi.fn().mockReturnThis(),
-      single: vi.fn(),
-    })),
+    from: vi.fn(() => createQueryMock()),
     storage: {
       from: vi.fn(() => ({
         upload: vi.fn(),
         getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://example.com/image.jpg' } })),
       })),
     },
-  },
-}));
+  };
+
+  return { supabase: supabaseMock };
+});
