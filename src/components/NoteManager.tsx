@@ -513,15 +513,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   if (view === 'editor') {
       return (
-          <div className={cn("fixed inset-0 bg-background z-50 flex flex-col animate-in slide-in-from-bottom-4 duration-300", zenMode && "bg-background")}>
+          <div className={cn("fixed inset-0 bg-background z-50 flex flex-col h-[100dvh] animate-in slide-in-from-bottom-4 duration-300", zenMode && "bg-background")}>
               <header className={cn(
-                "px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur",
+                "px-2 sm:px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur shrink-0",
                 zenMode && "bg-background border-b border-border/40"
               )}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                     <Button
                       variant="ghost"
-                      className="-ml-2 text-muted-foreground hover:text-foreground"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground"
                       onClick={() => {
                         if (saveStatus === "unsaved") {
                           saveNote(title, content, isPinned, isPublished, tags);
@@ -530,37 +531,36 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         fetchNotes();
                       }}
                     >
-                      <ArrowLeft className="w-5 h-5 mr-1" />
-                      返回
+                      <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1" />
+                      <span className="hidden sm:inline">返回</span>
                     </Button>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto scrollbar-hide flex-1 justify-end min-w-0">
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                       {!zenMode && (
                         <>
-                          <Button variant="ghost" size="icon" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
-                          <Button variant="ghost" size="icon" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
-                          <Button variant="ghost" size="icon" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
-                          <div className="w-[1px] h-4 bg-border mx-1"></div>
+                          <Button variant="ghost" size="icon" className="shrink-0" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
+                          <Button variant="ghost" size="icon" className="shrink-0" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
+                          <Button variant="ghost" size="icon" className="shrink-0" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
+                          <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0"></div>
                         </>
                       )}
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="shrink-0 px-1.5 sm:px-2 text-xs flex items-center gap-0.5 sm:gap-1"
                         disabled={!canRevert}
                         onClick={handleRevertToLastSaved}
-                        className={cn(
-                          "px-2 text-xs flex items-center gap-1",
-                          !canRevert && "opacity-40 cursor-not-allowed"
-                        )}
+                        title={!canRevert ? "无可撤回操作" : "撤回到上一步"}
                       >
                         <RotateCcw className="w-3 h-3" />
-                        撤回
+                        <span className="hidden sm:inline">撤回</span>
                       </Button>
-                      <div className="w-[1px] h-4 bg-border mx-1"></div>
+                      <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0"></div>
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="shrink-0"
                         title={zenMode ? "退出专注模式" : "进入专注模式"}
                         onClick={() => setZenMode((v) => !v)}
                       >
@@ -570,12 +570,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                           <Maximize2 className="w-4 h-4 text-muted-foreground" />
                         )}
                       </Button>
-                      <button onClick={() => setPreviewMode(!previewMode)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={14}/> 编辑</> : <><Eye size={14}/> 预览</>}</button>
-                      <div className="text-xs text-muted-foreground w-12 text-right">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
+                      <button onClick={() => setPreviewMode(!previewMode)} className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">编辑</span></> : <><Eye size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">预览</span></>}</button>
+                      <div className="text-xs text-muted-foreground w-8 sm:w-12 text-right shrink-0">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
                   </div>
               </header>
               <div className={cn(
-                "flex-1 mx-auto w-full flex flex-col p-4 md:p-8 overflow-y-auto",
+                "flex-1 mx-auto w-full flex flex-col p-3 sm:p-4 md:p-8 overflow-y-auto min-h-0",
                 zenMode ? "max-w-5xl" : "max-w-3xl"
               )}>
                   <Input
@@ -644,14 +644,14 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       <div className="h-20" />
                     </div>
                   ) : (
-                    <div className="relative flex-1 mt-4">
+                    <div className="relative flex-1 mt-4 min-h-0">
                       <Textarea
                         ref={editorRef}
                         value={content}
                         onChange={handleEditorChange}
                         onKeyDown={handleEditorKeyDown}
                         placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
-                        className="min-h-[220px] max-h-[70vh] resize-none border-none shadow-none px-0 focus-visible:ring-0 text-lg leading-relaxed bg-transparent p-0 font-sans"
+                        className="w-full h-full min-h-[200px] resize-none border-none shadow-none px-0 focus-visible:ring-0 text-base sm:text-lg leading-relaxed bg-transparent p-0 font-sans"
                       />
                       {linkMenuOpen && linkCandidates.length > 0 && (
                         <div className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-lg border border-border bg-popover shadow-lg z-10">
