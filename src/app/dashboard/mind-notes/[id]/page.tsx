@@ -42,3 +42,4 @@ export default function MindNoteDetailPage() {
   return <MindNoteEditor mindNoteId={params.id} userId={user.id} />;
 }
 
+

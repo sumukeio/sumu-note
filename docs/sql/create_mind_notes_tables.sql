@@ -143,3 +143,4 @@ CREATE POLICY "Users can delete their own mind note nodes"
 -- 执行以下查询验证策略是否创建成功：
 -- SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('mind_notes', 'mind_note_nodes');
 
+

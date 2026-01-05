@@ -1040,7 +1040,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                 e.preventDefault();
                                 e.stopPropagation();
                                 if (canRevert) {
-                                  handleRevertToLastSaved();
+                                handleRevertToLastSaved();
                                 }
                                 setMoreMenuOpen(false);
                               }}
