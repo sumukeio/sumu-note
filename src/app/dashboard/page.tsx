@@ -111,6 +111,11 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Link href="/dashboard/mind-notes">
+              <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
+                思维笔记
+              </Button>
+            </Link>
             <Link href="/dashboard/stats">
               <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
                 统计

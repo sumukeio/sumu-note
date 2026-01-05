@@ -1,118 +1,79 @@
 "use client";
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import Link from "next/link";
-
-// 轻量级 [[wikilink]] 解析：
-// [[title]]              -> [title](/notes/title)
-// [[noteId|显示名称]]    -> [显示名称](/notes/noteId)
-function transformWikiLinks(markdown: string): string {
-  if (!markdown) return "";
-
-  return markdown.replace(
-    /\[\[([^[\]|]+)(\|([^[\]]+))?\]\]/g,
-    (_match, rawTarget: string, _pipe: string | undefined, display?: string) => {
-      const target = String(rawTarget).trim();
-      const label = (display ?? target).trim();
-
-      if (!target) return label;
-
-      const href = `/notes/${encodeURIComponent(target)}`;
-      return `[${label}](${href})`;
-    }
-  );
-}
-
-const markdownComponents = {
-  h1: ({ node, ...props }: any) => (
-    <h1
-      className="text-3xl font-bold mt-8 mb-4 border-b border-border/50 pb-2"
-      {...props}
-    />
-  ),
-  h2: ({ node, ...props }: any) => (
-    <h2 className="text-2xl font-bold mt-6 mb-3" {...props} />
-  ),
-  h3: ({ node, ...props }: any) => (
-    <h3 className="text-xl font-bold mt-5 mb-2" {...props} />
-  ),
-  p: ({ node, ...props }: any) => (
-    <p className="mb-4 leading-7 text-muted-foreground" {...props} />
-  ),
-  ul: ({ node, ...props }: any) => (
-    <ul className="list-disc list-inside mb-4 pl-2 space-y-1" {...props} />
-  ),
-  ol: ({ node, ...props }: any) => (
-    <ol className="list-decimal list-inside mb-4 pl-2 space-y-1" {...props} />
-  ),
-  blockquote: ({ node, ...props }: any) => (
-    <blockquote
-      className="border-l-4 border-blue-500/50 pl-4 py-1 italic text-muted-foreground my-4 bg-accent/30 rounded-r"
-      {...props}
-    />
-  ),
-  img: ({ node, ...props }: any) => (
-    <img
-      className="rounded-lg shadow-md my-4 max-w-full"
-      {...props}
-    />
-  ),
-  code: ({ node, inline, ...props }: any) =>
-    inline ? (
-      <code
-        className="bg-muted px-1.5 py-0.5 rounded font-mono text-sm border border-border text-pink-500"
-        {...props}
-      />
-    ) : (
-      // 注意：这里不能返回 <div>，否则会被包在 <p> 里触发 Hydration 报错
-      <code
-        className="block bg-zinc-950 text-zinc-50 p-4 rounded-lg my-4 overflow-x-auto border border-zinc-800 font-mono text-sm"
-        {...props}
-      />
-    ),
-  a: ({ node, href, ...props }: any) => {
-    const isInternal =
-      typeof href === "string" && href.startsWith("/notes/");
-
-    const className =
-      "inline-flex items-center rounded px-0.5 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors";
-
-    if (isInternal && typeof href === "string") {
-      return (
-        <Link href={href} className={className}>
-          {props.children}
-        </Link>
-      );
-    }
-
-    return (
-      <a
-        className="text-blue-500 hover:underline font-medium"
-        target="_blank"
-        rel="noopener noreferrer"
-        href={href}
-        {...props}
-      />
-    );
-  },
-};
 
 interface MarkdownRendererProps {
   content: string;
 }
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
-  const transformed = React.useMemo(
-    () => transformWikiLinks(content || ""),
-    [content]
-  );
+  const router = useRouter();
+
+  // 处理双向链接：[[noteId|显示名称]] 或 [[笔记标题]]
+  // 将 [[...]] 转换为 Markdown 链接格式 [...](...)
+  const processWikiLinks = (text: string): string => {
+    // 匹配 [[noteId|显示名称]] 或 [[笔记标题]]
+    // 使用负向前瞻确保不会匹配嵌套的 [[]]
+    const wikiLinkRegex = /\[\[([^\]]+)\]\]/g;
+    
+    return text.replace(wikiLinkRegex, (match, linkContent) => {
+      // 检查是否有 | 分隔符
+      const parts = linkContent.split("|");
+      const noteIdOrTitle = parts[0].trim();
+      const displayName = parts.length > 1 ? parts[1].trim() : noteIdOrTitle;
+      
+      // 生成链接，使用 noteId 或编码后的标题
+      const href = `/notes/${encodeURIComponent(noteIdOrTitle)}`;
+      
+      // 转换为 Markdown 链接格式
+      return `[${displayName}](${href})`;
+    });
+  };
+
+  // 处理后的内容
+  const processedContent = processWikiLinks(content);
 
   return (
-    <ReactMarkdown components={markdownComponents}>
-      {transformed || "*（暂无内容）*"}
-    </ReactMarkdown>
+    <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none">
+      <ReactMarkdown
+        components={{
+          // 自定义链接组件，处理内部链接跳转
+          a: ({ href, children, ...props }) => {
+            // 检查是否是内部笔记链接
+            if (href?.startsWith("/notes/")) {
+              return (
+                <a
+                  {...props}
+                  href={href}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    router.push(href);
+                  }}
+                  className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline cursor-pointer"
+                >
+                  {children}
+                </a>
+              );
+            }
+            // 外部链接
+            return (
+              <a
+                {...props}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline"
+              >
+                {children}
+              </a>
+            );
+          },
+        }}
+      >
+        {processedContent}
+      </ReactMarkdown>
+    </div>
   );
 }
-
-

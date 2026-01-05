@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { 
   Copy, Trash2, FolderInput, X, Check, Loader2, Plus, 
   FileText, ArrowLeft, CheckCircle2, Pencil, Eye, PenLine, 
-  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical
+  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical, WifiOff, Wifi, History
 } from "lucide-react"; 
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { createNoteVersion, getNoteVersions, type NoteVersion } from "@/lib/version-history";
+import { isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes } from "@/lib/offline-storage";
 
 import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -138,16 +141,27 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [isPinned, setIsPinned] = useState(false);
   const [isPublished, setIsPublished] = useState(false);
+  const [isOnlineState, setIsOnlineState] = useState(true); // 网络状态
   
   // 实时同步相关状态
   const [cloudUpdateDialogOpen, setCloudUpdateDialogOpen] = useState(false);
   const [cloudUpdateNote, setCloudUpdateNote] = useState<any>(null);
+  const [refreshConfirmDialogOpen, setRefreshConfirmDialogOpen] = useState(false); // 刷新确认对话框
   const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳
   const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
+  
+  // 版本历史相关状态
+  const [versionHistoryDialogOpen, setVersionHistoryDialogOpen] = useState(false);
+  const [versions, setVersions] = useState<NoteVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [selectedVersion, setSelectedVersion] = useState<NoteVersion | null>(null);
   
   // 移动端更多菜单
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuPortalRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
 
   // 多选与拖拽
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -247,45 +261,114 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           finalTitle = currentContent.split('\n')[0]?.replace(/[#*`]/g, '').trim().slice(0, 30) || "";
           setTitle(finalTitle); 
       }
-      // 首次尝试：包含 tags 字段
-      let { error } = await supabase
-        .from("notes")
-        .update({
-          title: finalTitle,
-          content: currentContent,
-          is_pinned: pinned,
-          is_published: published,
-          // 标签作为逗号分隔字符串持久化到 tags 字段（需要在数据库中添加该列）
-          tags: currentTags.join(","),
-          updated_at: now.toISOString(),
-        })
-        .eq("id", currentNote.id);
 
-      // 如果后端还没有 tags 字段，降级为不更新 tags，避免整条更新失败
-      if (error && typeof error.message === "string" && error.message.includes("column") && error.message.includes("tags")) {
-        console.warn("[NoteManager] notes.tags 列不存在，将在无标签模式下保存笔记。");
-        const retry = await supabase
+      const online = isOnline();
+      let isNetworkError = false;
+
+      // 如果在线，尝试直接保存到 Supabase
+      if (online) {
+        // 首次尝试：包含 tags 字段
+        let { error } = await supabase
           .from("notes")
           .update({
-          title: finalTitle, 
-          content: currentContent, 
-          is_pinned: pinned,
-          is_published: published,
+            title: finalTitle,
+            content: currentContent,
+            is_pinned: pinned,
+            is_published: published,
+            // 标签作为逗号分隔字符串持久化到 tags 字段（需要在数据库中添加该列）
+            tags: currentTags.join(","),
             updated_at: now.toISOString(),
           })
           .eq("id", currentNote.id);
-        error = retry.error;
-      }
 
-      if (!error) {
-        setSaveStatus("saved");
-        // 记录保存时间戳，用于检测云端更新
-        lastSavedTimestampRef.current = now.toISOString();
+        // 检查是否是网络错误
+        if (error) {
+          const errorMessage = error.message || String(error);
+          isNetworkError = errorMessage.includes("Failed to fetch") || 
+                          errorMessage.includes("ERR_INTERNET_DISCONNECTED") ||
+                          errorMessage.includes("NetworkError") ||
+                          errorMessage.includes("network");
+        }
+
+        // 如果后端还没有 tags 字段，降级为不更新 tags，避免整条更新失败
+        if (error && !isNetworkError && typeof error.message === "string" && error.message.includes("column") && error.message.includes("tags")) {
+          console.warn("[NoteManager] notes.tags 列不存在，将在无标签模式下保存笔记。");
+          const retry = await supabase
+            .from("notes")
+            .update({
+            title: finalTitle, 
+            content: currentContent, 
+            is_pinned: pinned,
+            is_published: published,
+              updated_at: now.toISOString(),
+            })
+            .eq("id", currentNote.id);
+          error = retry.error;
+          
+          // 再次检查是否是网络错误
+          if (error) {
+            const errorMessage = error.message || String(error);
+            isNetworkError = errorMessage.includes("Failed to fetch") || 
+                            errorMessage.includes("ERR_INTERNET_DISCONNECTED") ||
+                            errorMessage.includes("NetworkError") ||
+                            errorMessage.includes("network");
+          }
+        }
+
+        if (!error) {
+          setSaveStatus("saved");
+          // 记录保存时间戳，用于检测云端更新
+          lastSavedTimestampRef.current = now.toISOString();
+          
+          // 创建版本历史（异步，不阻塞保存流程）
+          createNoteVersion(currentNote.id, userId, finalTitle, currentContent, currentTags).catch(err => {
+            console.warn("Failed to create note version:", err);
+          });
+        } else if (isNetworkError) {
+          // 网络错误：保存到离线存储
+          console.warn("[NoteManager] 网络错误，切换到离线模式保存");
+          try {
+            await savePendingSyncNote({
+              note_id: currentNote.id,
+              user_id: userId,
+              title: finalTitle,
+              content: currentContent,
+              tags: currentTags.join(","),
+              is_pinned: pinned,
+              is_published: published,
+              operation: "update",
+            });
+            setSaveStatus("saved"); // 显示为已保存，但实际是离线保存
+            console.log("[NoteManager] 笔记已保存到本地（离线模式）");
+          } catch (err) {
+            console.error("[NoteManager] 离线保存失败：", err);
+            setSaveStatus("error");
+          }
+        } else {
+          console.error("[NoteManager] 保存笔记失败：", error.message || error);
+          setSaveStatus("error");
+        }
       } else {
-        console.error("[NoteManager] 保存笔记失败：", error.message || error);
-        setSaveStatus("error");
+        // 离线模式：保存到 IndexedDB
+        try {
+          await savePendingSyncNote({
+            note_id: currentNote.id,
+            user_id: userId,
+            title: finalTitle,
+            content: currentContent,
+            tags: currentTags.join(","),
+            is_pinned: pinned,
+            is_published: published,
+            operation: "update",
+          });
+          setSaveStatus("saved"); // 显示为已保存，但实际是离线保存
+          console.log("[NoteManager] 笔记已保存到本地（离线模式）");
+        } catch (err) {
+          console.error("[NoteManager] 离线保存失败：", err);
+          setSaveStatus("error");
+        }
       }
-  }, [currentNote]);
+  }, [currentNote, userId]);
 
   const handleContentChange = (newTitle: string, newContent: string) => { 
       const now = Date.now();
@@ -400,6 +483,29 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
   };
   
+  const handleDeleteCurrentNote = async () => {
+    if (!currentNote) return;
+    
+    if (confirm("确定要将这篇笔记移入回收站吗？")) {
+      // 先保存当前更改（如果有）
+      if (saveStatus === "unsaved") {
+        await saveNote(title, content, isPinned, isPublished, tags);
+      }
+      
+      // 标记为已删除
+      const { error } = await supabase
+        .from('notes')
+        .update({ is_deleted: true })
+        .eq('id', currentNote.id);
+      
+      if (!error) {
+        // 返回列表视图并刷新
+        setView("list");
+        fetchNotes();
+      }
+    }
+  };
+
   const togglePin = async () => {
       const newStatus = !isPinned;
       setIsPinned(newStatus);
@@ -442,6 +548,45 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   };
 
   useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (view === 'editor') saveNote(title, content, isPinned, isPublished, tags); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [view, title, content, isPinned, isPublished, tags, saveNote]);
+
+  // 网络状态监听和自动同步
+  useEffect(() => {
+    // 初始化网络状态
+    setIsOnlineState(isOnline());
+
+    const unsubscribe = onNetworkStatusChange((online) => {
+      setIsOnlineState(online);
+      if (online) {
+        // 网络恢复时自动同步
+        syncPendingNotes().then(({ success, failed }) => {
+          if (success > 0) {
+            console.log(`[NoteManager] 已同步 ${success} 条离线更改`);
+            // 如果有同步成功的笔记，刷新笔记列表
+            if (view === 'list') {
+              fetchNotes();
+            }
+          }
+          if (failed > 0) {
+            console.warn(`[NoteManager] ${failed} 条离线更改同步失败`);
+          }
+        });
+      }
+    });
+
+    // 组件挂载时检查是否有待同步的笔记
+    if (isOnline()) {
+      syncPendingNotes().then(({ success }) => {
+        if (success > 0) {
+          console.log(`[NoteManager] 启动时同步了 ${success} 条离线更改`);
+          if (view === 'list') {
+            fetchNotes();
+          }
+        }
+      });
+    }
+
+    return unsubscribe;
+  }, [view]);
 
   // 实时同步：订阅当前笔记的变化
   useEffect(() => {
@@ -494,8 +639,19 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   }, [view, currentNote]);
 
   // 处理云端更新：刷新并放弃本地更改
-  const handleRefreshFromCloud = async () => {
+  const handleRefreshFromCloud = async (saveLocalFirst: boolean = false) => {
     if (!cloudUpdateNote) return;
+    
+    // 如果需要先保存本地更改
+    if (saveLocalFirst && currentNote) {
+      // 先保存当前本地内容（创建版本历史）
+      try {
+        await createNoteVersion(currentNote.id, userId, title, content, tags);
+        console.log("[NoteManager] 已保存本地更改到版本历史");
+      } catch (err) {
+        console.warn("[NoteManager] 保存版本历史失败:", err);
+      }
+    }
     
     // 刷新笔记数据
     setTitle(cloudUpdateNote.title || "");
@@ -539,27 +695,25 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node;
-      // 检查点击是否在菜单容器外（ref 包含按钮和菜单）
-      if (moreMenuRef.current && !moreMenuRef.current.contains(target)) {
-        console.log('Click outside detected, closing menu');
+      // 检查点击是否在按钮或菜单内
+      const isClickInButton = moreButtonRef.current?.contains(target);
+      const isClickInMenu = moreMenuPortalRef.current?.contains(target);
+      
+      if (!isClickInButton && !isClickInMenu) {
         setMoreMenuOpen(false);
-      } else {
-        console.log('Click inside menu container, keeping menu open');
       }
     };
     
     // 延迟添加监听器，确保 React onClick 事件先处理
     const timeoutId = setTimeout(() => {
-      console.log('Adding click outside listeners');
-      document.addEventListener('click', handleClickOutside, true);
-      document.addEventListener('touchend', handleClickOutside, true);
+      document.addEventListener('mousedown', handleClickOutside, true);
+      document.addEventListener('touchstart', handleClickOutside, true);
     }, 100);
     
     return () => {
       clearTimeout(timeoutId);
-      console.log('Removing click outside listeners');
-      document.removeEventListener('click', handleClickOutside, true);
-      document.removeEventListener('touchend', handleClickOutside, true);
+      document.removeEventListener('mousedown', handleClickOutside, true);
+      document.removeEventListener('touchstart', handleClickOutside, true);
     };
   }, [moreMenuOpen]);
 
@@ -602,6 +756,46 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
       return next;
     });
+  };
+
+  // 版本历史相关函数
+  const loadVersions = async () => {
+    if (!currentNote) return;
+    setVersionsLoading(true);
+    try {
+      const versionList = await getNoteVersions(currentNote.id);
+      setVersions(versionList);
+    } catch (error) {
+      console.error("获取版本历史失败:", error);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const handleOpenVersionHistory = async () => {
+    setVersionHistoryDialogOpen(true);
+    await loadVersions();
+  };
+
+  const handleRestoreVersion = async (version: NoteVersion) => {
+    if (!currentNote) return;
+    
+    // 恢复版本内容
+    setTitle(version.title || "");
+    setContent(version.content || "");
+    if (version.tags) {
+      setTags(version.tags.split(",").map(t => t.trim()).filter(Boolean));
+    } else {
+      setTags([]);
+    }
+    
+    // 保存恢复的版本
+    const versionTags = version.tags ? version.tags.split(",").map(t => t.trim()).filter(Boolean) : [];
+    await saveNote(version.title || "", version.content || "", isPinned, isPublished, versionTags);
+    
+    // 关闭对话框
+    setVersionHistoryDialogOpen(false);
+    setSelectedVersion(null);
   };
 
   // --- 交互逻辑 ---
@@ -683,18 +877,40 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                           <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
                         </>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="shrink-0 px-1.5 sm:px-2 text-xs flex items-center gap-0.5 sm:gap-1 hidden sm:flex"
-                        disabled={!canRevert}
-                        onClick={handleRevertToLastSaved}
-                        title={!canRevert ? "无可撤回操作" : "撤回到上一步"}
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        <span className="hidden sm:inline">撤回</span>
-                      </Button>
-                      <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
+                      {!zenMode && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0 px-1.5 sm:px-2 text-xs flex items-center gap-0.5 sm:gap-1 hidden sm:flex"
+                            disabled={!canRevert}
+                            onClick={handleRevertToLastSaved}
+                            title={!canRevert ? "无可撤回操作" : "撤回到上一步"}
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span className="hidden sm:inline">撤回</span>
+                          </Button>
+                          <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0 hidden sm:flex"
+                            title="版本历史"
+                            onClick={handleOpenVersionHistory}
+                          >
+                            <History className="w-4 h-4 text-muted-foreground" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0 hidden sm:flex text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                            title="删除笔记"
+                            onClick={handleDeleteCurrentNote}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -712,35 +928,65 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       {/* 移动端：更多菜单按钮 */}
                       <div className="relative sm:hidden" ref={moreMenuRef}>
                         <button
+                          ref={moreButtonRef}
                           type="button"
-                          className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                          className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 touch-manipulation"
                           onClick={(e) => {
                             e.stopPropagation();
-                            console.log('More button clicked! Current state:', moreMenuOpen);
-                            setMoreMenuOpen((prev) => {
-                              console.log('Setting state from', prev, 'to', !prev);
-                              return !prev;
-                            });
+                            e.preventDefault();
+                            if (moreButtonRef.current) {
+                              const rect = moreButtonRef.current.getBoundingClientRect();
+                              setMenuPosition({
+                                top: rect.bottom + 4,
+                                right: window.innerWidth - rect.right
+                              });
+                            }
+                            setMoreMenuOpen((prev) => !prev);
+                          }}
+                          onTouchEnd={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            if (moreButtonRef.current) {
+                              const rect = moreButtonRef.current.getBoundingClientRect();
+                              setMenuPosition({
+                                top: rect.bottom + 4,
+                                right: window.innerWidth - rect.right
+                              });
+                            }
+                            setMoreMenuOpen((prev) => !prev);
                           }}
                         >
                           <MoreVertical className="w-4 h-4 text-muted-foreground" />
                         </button>
-                        
-                        {/* 更多菜单弹出层 - 使用 Portal 避免被 overflow 裁剪 */}
-                        {moreMenuOpen && typeof document !== 'undefined' && (
-                          <div
-                            className="fixed right-2 w-48 rounded-lg border border-border bg-popover shadow-lg z-[100] py-1"
-                            style={{ 
-                              top: 'calc(3.5rem + 4px)',
-                              right: '0.5rem'
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
+                      </div>
+                      
+                      {/* 更多菜单弹出层 - 使用 Portal 渲染到 body */}
+                      {moreMenuOpen && typeof document !== 'undefined' && createPortal(
+                        <div
+                          ref={moreMenuPortalRef}
+                          className="fixed w-48 rounded-lg border border-border bg-popover shadow-lg z-[99999] py-1"
+                          style={{ 
+                            top: `${menuPosition.top}px`,
+                            right: `${Math.max(8, menuPosition.right)}px`,
+                            maxWidth: `calc(100vw - 16px)`
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchEnd={(e) => e.stopPropagation()}
+                        >
                             {!zenMode && (
                               <>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                                  onClick={() => {
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    fileInputRef.current?.click();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     fileInputRef.current?.click();
                                     setMoreMenuOpen(false);
                                   }}
@@ -749,8 +995,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <span>插入图片</span>
                                 </button>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                                  onClick={() => {
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    togglePin();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     togglePin();
                                     setMoreMenuOpen(false);
                                   }}
@@ -759,8 +1013,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <span>{isPinned ? "取消置顶" : "置顶笔记"}</span>
                                 </button>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                                  onClick={() => {
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    togglePublish();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     togglePublish();
                                     setMoreMenuOpen(false);
                                   }}
@@ -772,10 +1034,22 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                               </>
                             )}
                             <button
-                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
                               disabled={!canRevert}
-                              onClick={() => {
-                                handleRevertToLastSaved();
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (canRevert) {
+                                  handleRevertToLastSaved();
+                                }
+                                setMoreMenuOpen(false);
+                              }}
+                              onTouchEnd={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (canRevert) {
+                                  handleRevertToLastSaved();
+                                }
                                 setMoreMenuOpen(false);
                               }}
                             >
@@ -783,8 +1057,53 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                               <span>撤回</span>
                             </button>
                             <button
-                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
-                              onClick={() => {
+                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleOpenVersionHistory();
+                                setMoreMenuOpen(false);
+                              }}
+                              onTouchEnd={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleOpenVersionHistory();
+                                setMoreMenuOpen(false);
+                              }}
+                            >
+                              <History className="w-4 h-4" />
+                              <span>版本历史</span>
+                            </button>
+                            <div className="h-[1px] bg-border my-1"></div>
+                            <button
+                              className="w-full px-4 py-2 text-left text-sm hover:bg-red-500/10 text-red-500 flex items-center gap-2 touch-manipulation"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeleteCurrentNote();
+                                setMoreMenuOpen(false);
+                              }}
+                              onTouchEnd={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeleteCurrentNote();
+                                setMoreMenuOpen(false);
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              <span>删除笔记</span>
+                            </button>
+                            <button
+                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setZenMode((v) => !v);
+                                setMoreMenuOpen(false);
+                              }}
+                              onTouchEnd={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
                                 setZenMode((v) => !v);
                                 setMoreMenuOpen(false);
                               }}
@@ -801,29 +1120,43 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                 </>
                               )}
                             </button>
+                        </div>
+                        , document.body
+                      )}
+                      
+                      {/* 编辑/预览切换（专注模式下隐藏） */}
+                      {!zenMode && (
+                        <button onClick={() => setPreviewMode(!previewMode)} className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">编辑</span></> : <><Eye size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">预览</span></>}</button>
+                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {!isOnlineState && (
+                          <div className="flex items-center gap-1 text-xs text-amber-600" title="离线模式 - 更改将保存到本地">
+                            <WifiOff className="w-3 h-3" />
+                            <span className="hidden sm:inline">离线</span>
                           </div>
                         )}
+                        <div className="text-xs text-muted-foreground w-8 sm:w-12 text-right shrink-0">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
                       </div>
-                      
-                      {/* 编辑/预览切换（所有设备都显示） */}
-                      <button onClick={() => setPreviewMode(!previewMode)} className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">编辑</span></> : <><Eye size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">预览</span></>}</button>
-                      <div className="text-xs text-muted-foreground w-8 sm:w-12 text-right shrink-0">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
                   </div>
               </header>
               <div className={cn(
-                "flex-1 mx-auto w-full flex flex-col p-3 sm:p-4 md:p-8 overflow-y-auto min-h-0",
-                zenMode ? "max-w-5xl" : "max-w-3xl"
+                "flex-1 mx-auto w-full flex flex-col overflow-y-auto min-h-0",
+                zenMode ? "max-w-4xl px-8 py-12" : "max-w-3xl p-3 sm:p-4 md:p-8"
               )}>
                   <Input
                     value={title}
                     onChange={(e) => handleContentChange(e.target.value, content)}
                     placeholder="无标题"
                     className={cn(
-                      "text-3xl md:text-4xl font-bold border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto py-4",
+                      "border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto",
+                      zenMode 
+                        ? "text-4xl md:text-5xl font-bold py-6" 
+                        : "text-3xl md:text-4xl font-bold py-4",
                       previewMode && "opacity-80 pointer-events-none"
                     )}
                   />
-                  {/* 标签编辑区域 */}
+                  {/* 标签编辑区域（专注模式下隐藏） */}
+                  {!zenMode && (
                   <div className="flex flex-wrap items-center gap-2 mb-3">
                     {tags.map((tag) => (
                       <button
@@ -874,6 +1207,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       }}
                     />
                   </div>
+                  )}
                   {previewMode ? (
                     <div className="flex-1 mt-4 animate-in fade-in duration-200">
                       <MarkdownRenderer content={content} />
@@ -887,7 +1221,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         onChange={handleEditorChange}
                         onKeyDown={handleEditorKeyDown}
                         placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
-                        className="w-full h-full min-h-[200px] resize-none border-none shadow-none px-0 focus-visible:ring-0 text-base sm:text-lg leading-relaxed bg-transparent p-0 font-sans"
+                        className={cn(
+                          "w-full h-full min-h-[200px] resize-none border-none shadow-none px-0 focus-visible:ring-0 bg-transparent p-0 font-sans",
+                          zenMode ? "text-lg leading-relaxed" : "text-base sm:text-lg leading-relaxed"
+                        )}
                       />
                       {linkMenuOpen && linkCandidates.length > 0 && (
                         <div className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-lg border border-border bg-popover shadow-lg z-10">
@@ -931,7 +1268,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
               <DialogHeader>
                 <DialogTitle>云端有更新</DialogTitle>
                 <DialogDescription>
-                  检测到其他设备更新了这篇笔记。你可以选择刷新以查看最新内容，或保留当前编辑的内容。
+                  检测到其他设备更新了这篇笔记。你可以选择查看最新内容，或保留当前编辑的内容。
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter className="gap-2 sm:gap-0">
@@ -942,9 +1279,171 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                   保留我的更改
                 </Button>
                 <Button
-                  onClick={handleRefreshFromCloud}
+                  onClick={() => {
+                    // 检查是否有未保存的更改
+                    if (saveStatus === 'unsaved' || title !== (currentNote?.title || '') || content !== (currentNote?.content || '')) {
+                      // 有未保存的更改，显示确认对话框
+                      setCloudUpdateDialogOpen(false);
+                      setRefreshConfirmDialogOpen(true);
+                    } else {
+                      // 没有未保存的更改，直接刷新
+                      handleRefreshFromCloud(false);
+                    }
+                  }}
                 >
-                  刷新查看最新
+                  查看最新内容
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* 版本历史对话框 */}
+          <Dialog open={versionHistoryDialogOpen} onOpenChange={setVersionHistoryDialogOpen}>
+            <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle>版本历史</DialogTitle>
+                <DialogDescription>
+                  查看和恢复笔记的历史版本
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {versionsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : versions.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    暂无版本历史
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {versions.map((version, index) => (
+                      <div
+                        key={version.id}
+                        className={cn(
+                          "p-4 rounded-lg border cursor-pointer transition-all hover:bg-accent",
+                          selectedVersion?.id === version.id && "bg-accent border-blue-500"
+                        )}
+                        onClick={() => setSelectedVersion(version)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm font-medium">
+                                {index === 0 ? "当前版本" : `版本 ${versions.length - index}`}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(version.created_at).toLocaleString("zh-CN", {
+                                  year: "numeric",
+                                  month: "2-digit",
+                                  day: "2-digit",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+                            <div className="text-sm text-muted-foreground line-clamp-2">
+                              {version.title || "无标题"}
+                            </div>
+                            {version.content && (
+                              <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                                {version.content.substring(0, 100)}
+                                {version.content.length > 100 ? "..." : ""}
+                              </div>
+                            )}
+                            {version.tags && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {version.tags
+                                  .split(",")
+                                  .map((t) => t.trim())
+                                  .filter(Boolean)
+                                  .map((t) => (
+                                    <span
+                                      key={t}
+                                      className="px-1.5 py-0.5 rounded-full bg-accent/60 text-[10px] text-accent-foreground"
+                                    >
+                                      #{t}
+                                    </span>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+                          {selectedVersion?.id === version.id && index !== 0 && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRestoreVersion(version);
+                              }}
+                              className="ml-4 shrink-0"
+                            >
+                              恢复此版本
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setVersionHistoryDialogOpen(false)}>
+                  关闭
+                </Button>
+                {selectedVersion && selectedVersion.id !== versions[0]?.id && (
+                  <Button
+                    onClick={() => {
+                      if (selectedVersion) {
+                        handleRestoreVersion(selectedVersion);
+                      }
+                    }}
+                  >
+                    恢复选中版本
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* 刷新确认对话框：询问是否先保存本地更改 */}
+          <Dialog open={refreshConfirmDialogOpen} onOpenChange={setRefreshConfirmDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>确认刷新</DialogTitle>
+                <DialogDescription>
+                  刷新将使用云端版本，当前未保存的更改将丢失。
+                  <br />
+                  是否先保存当前更改到版本历史？保存后仍可恢复。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setRefreshConfirmDialogOpen(false);
+                    setCloudUpdateDialogOpen(true);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // 不保存，直接刷新
+                    handleRefreshFromCloud(false);
+                    setRefreshConfirmDialogOpen(false);
+                  }}
+                >
+                  不保存，直接刷新
+                </Button>
+                <Button
+                  onClick={() => {
+                    // 先保存到版本历史，再刷新
+                    handleRefreshFromCloud(true);
+                    setRefreshConfirmDialogOpen(false);
+                  }}
+                >
+                  保存后刷新
                 </Button>
               </DialogFooter>
             </DialogContent>

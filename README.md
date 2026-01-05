@@ -14,6 +14,18 @@ SumuNote 是一个现代化的 Web 笔记应用，专注于极简设计、流畅
 - **发布分享**：一键发布笔记到 Web，生成公开链接
 - **标签系统**：为笔记添加多个标签（如 `#项目`、`#想法`），支持标签筛选与搜索
 
+### 🧠 思维笔记（Mind Notes）
+- **大纲结构**：无限层级的节点树，支持任意深度的父子关系
+- **富文本格式化**：支持加粗（`**文本**`）、高亮（`==文本==`）
+- **快捷键操作**：
+  - 桌面端：Tab（创建子节点）、Enter（创建同级节点）、Shift+Tab（提升层级）、Alt+.（展开/折叠全部）
+  - 移动端：长按多选、拖拽改变层级、工具栏操作
+- **拖拽重排**：流畅的拖拽体验，支持改变节点层级和顺序
+- **文档内嵌**：在节点中插入其他思维笔记（`[[mind_note_id|显示名称]]`）
+- **文件夹支持**：思维笔记支持文件夹组织，与文本笔记共享文件夹系统
+- **长按多选**：长按文件夹或思维笔记进入多选模式，支持批量操作（重命名、移动、删除）
+- **Dock 工具栏**：多选模式下显示操作工具栏，支持拖拽到 Dock 执行操作
+
 ### 🔗 双向链接（Wiki-style Links）
 - **Markdown 链接语法**：支持 `[[笔记标题]]` 和 `[[noteId|显示名称]]` 语法
 - **自动链接渲染**：`[[...]]` 自动转换为可点击的内部链接
@@ -45,6 +57,9 @@ SumuNote 是一个现代化的 Web 笔记应用，专注于极简设计、流畅
 ### 💾 数据管理
 - **数据导出**：支持导出所有笔记为 ZIP 文件备份
 - **云端同步**：基于 Supabase 的实时数据同步
+- **实时同步**：使用 Supabase Realtime 实现多端实时同步，检测到云端更新时智能提示用户选择
+- **版本历史**：每次保存笔记时自动创建版本快照，保留最近 50 个版本，支持版本恢复
+- **离线支持**：支持离线编辑，自动保存到本地 IndexedDB，网络恢复后自动同步到云端
 - **数据安全**：企业级数据存储，用户数据私有化
 
 ## 🛠️ 技术栈
@@ -72,6 +87,7 @@ SumuNote 是一个现代化的 Web 笔记应用，专注于极简设计、流畅
 - **[@dnd-kit/core](https://dndkit.com/)** - 拖拽交互
 - **[date-fns](https://date-fns.org/)** - 日期处理
 - **[jszip](https://stuk.github.io/jszip/)** + **[file-saver](https://github.com/eligrey/FileSaver.js/)** - 数据导出
+- **[localforage](https://localforage.github.io/localForage/)** - 离线存储（IndexedDB）
 
 ### 开发工具
 - **[Vitest](https://vitest.dev/)** - 测试框架
@@ -86,6 +102,8 @@ sumu-note/
 │   ├── app/                    # Next.js App Router 页面
 │   │   ├── page.tsx           # 首页（登录页）
 │   │   ├── dashboard/         # 仪表盘
+│   │   │   ├── mind-notes/    # 思维笔记列表页
+│   │   │   └── mind-notes/[id]/ # 思维笔记编辑页
 │   │   ├── notes/[id]/        # 笔记详情页
 │   │   └── auth/callback/     # OAuth 回调
 │   ├── components/            # React 组件
@@ -93,11 +111,25 @@ sumu-note/
 │   │   ├── FolderManager.tsx  # 文件夹管理
 │   │   ├── NoteManager.tsx    # 笔记管理
 │   │   ├── MarkdownRenderer.tsx # Markdown 渲染（支持双向链接）
-│   │   └── ui/                # UI 基础组件
+│   │   ├── MindNoteManager.tsx # 思维笔记管理（列表页）
+│   │   ├── MindNoteEditor.tsx  # 思维笔记编辑器
+│   │   ├── MindNode.tsx       # 思维笔记节点组件
+│   │   ├── DraggableMindNode.tsx # 可拖拽节点组件
+│   │   ├── MindNodeToolbar.tsx # 移动端工具栏
+│   │   └── MindNodeContent.tsx # 节点内容渲染
 │   └── lib/                   # 工具函数
 │       ├── supabase.ts        # Supabase 客户端
 │       ├── stats.ts           # 统计数据逻辑
-│       └── export-utils.ts    # 导出功能
+│       ├── export-utils.ts    # 导出功能
+│       ├── version-history.ts # 版本历史管理
+│       ├── offline-storage.ts # 离线存储管理
+│       ├── mind-note-storage.ts # 思维笔记数据存储
+│       └── mind-note-utils.ts # 思维笔记工具函数
+├── docs/                      # 文档
+│   ├── sql/                   # SQL 脚本
+│   │   ├── create_mind_notes_tables.sql
+│   │   └── add_folder_support_to_mind_notes.sql
+│   └── MIND_NOTE_FEATURE.md   # 思维笔记功能文档
 ├── tests/                     # 测试文件
 └── public/                    # 静态资源
 ```
@@ -175,6 +207,18 @@ npm test:coverage    # 测试覆盖率
 
 ## 📝 最近更新
 
+### 🧠 思维笔记功能
+- **大纲编辑器**：类似 Workflowy/Roam Research 的无限层级节点结构
+- **富文本格式化**：支持加粗（`**文本**`）和高亮（`==文本==`）
+- **快捷键系统**：
+  - 桌面端：Tab（创建子节点）、Enter（创建同级节点）、Shift+Tab（提升层级）、Alt+.（展开/折叠全部）
+  - 移动端：长按多选、拖拽改变层级、工具栏操作
+- **拖拽重排**：流畅的拖拽体验，支持改变节点层级和顺序
+- **文档内嵌**：在节点中插入其他思维笔记（`[[mind_note_id|显示名称]]`）
+- **文件夹支持**：思维笔记支持文件夹组织，与文本笔记共享文件夹系统
+- **长按多选**：文件夹和思维笔记都支持长按（500ms）进入多选模式
+- **Dock 工具栏**：多选模式下显示操作工具栏（重命名、移动、删除），支持拖拽到 Dock 执行操作
+
 ### 🔐 OAuth 登录支持
 - **Google 登录**：一键使用 Google 账号登录/注册
 - **Apple 登录**：支持 Apple ID 登录（需配置）
@@ -209,6 +253,42 @@ npm test:coverage    # 测试覆盖率
   - 支持在所有笔记中按标题、内容、标签进行模糊搜索，并以列表形式展示结果
   - 点击搜索结果可直接跳转到对应的笔记详情页
 
+### 📚 版本历史
+- **自动版本快照**：每次保存笔记时自动创建版本历史，无需手动操作
+- **版本管理**：自动保留最近 50 个版本，旧版本自动清理以节省存储空间
+- **版本恢复**：支持查看和恢复任意历史版本（UI 功能待完善）
+- **数据安全**：版本历史存储在独立的 `note_versions` 表中，支持 RLS 权限控制
+
+### 📡 实时同步与离线支持
+- **实时同步（Realtime Sync）**
+  - 使用 Supabase Realtime 监听笔记变化，多端同时编辑时自动检测云端更新
+  - 智能冲突处理：检测到云端更新时提示用户选择
+    - **保留我的更改**：使用本地内容覆盖云端
+    - **查看最新内容**：加载云端最新版本
+      - 有未保存更改时，提供二次确认对话框
+      - 支持"保存后刷新"：先将本地更改保存到版本历史，再加载云端版本
+      - 支持"不保存，直接刷新"：丢弃本地更改，直接加载云端版本
+  - 无需手动刷新页面即可看到其他设备的更新
+
+- **离线支持（Offline Support）**
+  - **智能网络检测**：自动检测网络状态，即使 `navigator.onLine` 不准确也能通过错误捕获正确判断
+  - **离线编辑**：网络断开时自动保存到本地 IndexedDB，编辑体验不受影响
+  - **自动同步**：网络恢复时自动同步离线更改到云端
+  - **状态指示**：编辑器工具栏显示离线状态图标，清晰提示当前网络状态
+  - **数据持久化**：使用 localforage 封装 IndexedDB，确保离线数据不丢失
+
+### 🧠 思维笔记功能
+- **大纲编辑器**：类似 Workflowy/Roam Research 的无限层级节点结构
+- **富文本格式化**：支持加粗（`**文本**`）和高亮（`==文本==`）
+- **快捷键系统**：
+  - 桌面端：Tab（创建子节点）、Enter（创建同级节点）、Shift+Tab（提升层级）、Alt+.（展开/折叠全部）
+  - 移动端：长按多选、拖拽改变层级、工具栏操作
+- **拖拽重排**：使用 `@dnd-kit` 实现流畅的拖拽体验，支持改变节点层级和顺序
+- **文档内嵌**：在节点中插入其他思维笔记（`[[mind_note_id|显示名称]]`），支持跳转和预览
+- **文件夹组织**：思维笔记支持文件夹管理，与文本笔记共享文件夹系统
+- **长按多选**：文件夹和思维笔记都支持长按（500ms）进入多选模式
+- **Dock 工具栏**：多选模式下显示操作工具栏（重命名、移动、删除），支持拖拽到 Dock 执行操作
+
 ## 🔧 配置 OAuth 登录
 
 ### Google OAuth 配置
@@ -225,6 +305,148 @@ npm test:coverage    # 测试覆盖率
 2. 在 Apple Developer 创建 App ID 和 Service ID
 3. 配置回调 URL
 4. 在 Supabase Dashboard 中启用 Apple Provider 并填入凭据
+
+## 🔧 配置实时同步
+
+### 启用 Supabase Realtime
+
+实时同步功能使用 Supabase Realtime 实现多端同步。要启用此功能：
+
+1. 登录 [Supabase Dashboard](https://app.supabase.com)
+2. 选择你的项目
+3. 进入 **Database** → **Replication** 页面
+4. 找到 `notes` 表，点击右侧的开关启用 Realtime
+
+或者使用 SQL：
+
+```sql
+-- 启用 notes 表的 Realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE notes;
+```
+
+### 验证设置
+
+运行以下 SQL 查询验证 Realtime 已启用：
+
+```sql
+SELECT * FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'notes';
+```
+
+如果返回一行数据，说明设置成功。
+
+## 🔧 配置版本历史
+
+### 创建版本历史表
+
+版本历史功能需要在 Supabase 数据库中创建 `note_versions` 表：
+
+1. 登录 [Supabase Dashboard](https://app.supabase.com)
+2. 选择你的项目
+3. 进入 **SQL Editor**
+4. 执行以下 SQL 脚本（见 `docs/sql/create_note_versions.sql`）
+
+```sql
+-- 创建 note_versions 表
+CREATE TABLE note_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  note_id UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT,
+  content TEXT,
+  tags TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 创建索引
+CREATE INDEX idx_note_versions_note_id ON note_versions(note_id);
+CREATE INDEX idx_note_versions_created_at ON note_versions(created_at DESC);
+
+-- 启用 RLS
+ALTER TABLE note_versions ENABLE ROW LEVEL SECURITY;
+
+-- 创建 RLS 策略
+CREATE POLICY "Users can view their own note versions"
+  ON note_versions FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own note versions"
+  ON note_versions FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own note versions"
+  ON note_versions FOR DELETE
+  USING (auth.uid() = user_id);
+```
+
+### 自动清理旧版本（可选）
+
+版本历史表会自动保留最近 50 个版本，旧版本会被自动清理。如需调整清理策略，可修改 SQL 脚本中的触发器逻辑。
+
+## 🔧 配置思维笔记
+
+### 创建思维笔记表
+
+思维笔记功能需要在 Supabase 数据库中创建 `mind_notes` 和 `mind_note_nodes` 表：
+
+1. 登录 [Supabase Dashboard](https://app.supabase.com)
+2. 选择你的项目
+3. 进入 **SQL Editor**
+4. 执行以下 SQL 脚本（见 `docs/sql/create_mind_notes_tables.sql`）
+
+```sql
+-- 创建 mind_notes 表（思维笔记主表）
+CREATE TABLE IF NOT EXISTS mind_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT '未命名思维笔记',
+  root_node_id UUID,
+  folder_id UUID REFERENCES folders(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  is_deleted BOOLEAN DEFAULT FALSE
+);
+
+-- 创建 mind_note_nodes 表（思维笔记节点表）
+CREATE TABLE IF NOT EXISTS mind_note_nodes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  mind_note_id UUID NOT NULL REFERENCES mind_notes(id) ON DELETE CASCADE,
+  parent_id UUID REFERENCES mind_note_nodes(id) ON DELETE CASCADE,
+  content TEXT NOT NULL DEFAULT '',
+  order_index INTEGER NOT NULL DEFAULT 0,
+  is_expanded BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_mind_notes_user_id ON mind_notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_mind_notes_updated_at ON mind_notes(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mind_notes_is_deleted ON mind_notes(is_deleted) WHERE is_deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_mind_notes_folder_id ON mind_notes(folder_id);
+CREATE INDEX IF NOT EXISTS idx_mind_note_nodes_mind_note_id ON mind_note_nodes(mind_note_id);
+CREATE INDEX IF NOT EXISTS idx_mind_note_nodes_parent_id ON mind_note_nodes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_mind_note_nodes_order ON mind_note_nodes(mind_note_id, parent_id, order_index);
+
+-- 启用 RLS
+ALTER TABLE mind_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mind_note_nodes ENABLE ROW LEVEL SECURITY;
+
+-- 创建 RLS 策略（详见 docs/sql/create_mind_notes_tables.sql）
+```
+
+### 添加文件夹支持（可选）
+
+如果需要在思维笔记中使用文件夹功能，执行以下 SQL 脚本（见 `docs/sql/add_folder_support_to_mind_notes.sql`）：
+
+```sql
+-- 为 mind_notes 表添加 folder_id 字段（如果尚未添加）
+ALTER TABLE mind_notes 
+ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES folders(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_mind_notes_folder_id ON mind_notes(folder_id);
+```
+
+详细配置步骤请查看 `docs/sql/create_mind_notes_tables.sql` 和 `docs/MIND_NOTE_FEATURE.md`。
 
 ## 📄 许可证
 
