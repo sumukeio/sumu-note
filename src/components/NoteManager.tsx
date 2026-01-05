@@ -4,13 +4,14 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { 
   Copy, Trash2, FolderInput, X, Check, Loader2, Plus, 
   FileText, ArrowLeft, CheckCircle2, Pencil, Eye, PenLine, 
-  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2
+  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical
 } from "lucide-react"; 
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -137,6 +138,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [isPinned, setIsPinned] = useState(false);
   const [isPublished, setIsPublished] = useState(false);
+  
+  // 实时同步相关状态
+  const [cloudUpdateDialogOpen, setCloudUpdateDialogOpen] = useState(false);
+  const [cloudUpdateNote, setCloudUpdateNote] = useState<any>(null);
+  const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳
+  const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
+  
+  // 移动端更多菜单
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
 
   // 多选与拖拽
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -220,7 +231,9 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setIsPublished(note.is_published || false);
       setSaveStatus('saved'); 
       setPreviewMode(false); 
-      setView('editor'); 
+      setView('editor');
+      // 记录初始时间戳
+      lastSavedTimestampRef.current = note.updated_at || new Date().toISOString();
   };
 
   const handleAddNote = async () => { const { data } = await supabase.from('notes').insert({ user_id: userId, folder_id: folderId, title: "", content: "" }).select().single(); if (data) enterEditor(data); };
@@ -254,10 +267,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
         const retry = await supabase
           .from("notes")
           .update({
-            title: finalTitle,
-            content: currentContent,
-            is_pinned: pinned,
-            is_published: published,
+          title: finalTitle, 
+          content: currentContent, 
+          is_pinned: pinned,
+          is_published: published,
             updated_at: now.toISOString(),
           })
           .eq("id", currentNote.id);
@@ -266,6 +279,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
       if (!error) {
         setSaveStatus("saved");
+        // 记录保存时间戳，用于检测云端更新
+        lastSavedTimestampRef.current = now.toISOString();
       } else {
         console.error("[NoteManager] 保存笔记失败：", error.message || error);
         setSaveStatus("error");
@@ -428,6 +443,126 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (view === 'editor') saveNote(title, content, isPinned, isPublished, tags); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [view, title, content, isPinned, isPublished, tags, saveNote]);
 
+  // 实时同步：订阅当前笔记的变化
+  useEffect(() => {
+    if (view !== "editor" || !currentNote) {
+      // 清理之前的订阅
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      return;
+    }
+
+    // 创建 Realtime 订阅通道
+    const channel = supabase
+      .channel(`note:${currentNote.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notes",
+          filter: `id=eq.${currentNote.id}`,
+        },
+        (payload) => {
+          const updatedNote = payload.new as any;
+          const updatedAt = updatedNote.updated_at;
+          
+          // 如果这次更新不是我们自己保存的（时间戳不同），则提示用户
+          if (
+            lastSavedTimestampRef.current &&
+            updatedAt !== lastSavedTimestampRef.current &&
+            new Date(updatedAt).getTime() > new Date(lastSavedTimestampRef.current).getTime()
+          ) {
+            // 检测到云端有更新
+            setCloudUpdateNote(updatedNote);
+            setCloudUpdateDialogOpen(true);
+          }
+        }
+      )
+      .subscribe();
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
+  }, [view, currentNote]);
+
+  // 处理云端更新：刷新并放弃本地更改
+  const handleRefreshFromCloud = async () => {
+    if (!cloudUpdateNote) return;
+    
+    // 刷新笔记数据
+    setTitle(cloudUpdateNote.title || "");
+    setContent(cloudUpdateNote.content || "");
+    
+    // 解析 tags
+    const rawTags = (cloudUpdateNote as any).tags as string | null | undefined;
+    if (rawTags) {
+      setTags(
+        rawTags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      );
+    } else {
+      setTags([]);
+    }
+    
+    setIsPinned(cloudUpdateNote.is_pinned || false);
+    setIsPublished(cloudUpdateNote.is_published || false);
+    setCurrentNote(cloudUpdateNote);
+    lastSavedTimestampRef.current = cloudUpdateNote.updated_at || new Date().toISOString();
+    setSaveStatus('saved');
+    setCloudUpdateDialogOpen(false);
+    setCloudUpdateNote(null);
+  };
+
+  // 处理云端更新：保留本地更改（覆盖云端）
+  const handleKeepLocalChanges = async () => {
+    if (!currentNote) return;
+    
+    // 使用当前本地内容覆盖云端
+    await saveNote(title, content, isPinned, isPublished, tags);
+    setCloudUpdateDialogOpen(false);
+    setCloudUpdateNote(null);
+  };
+
+  // 点击外部关闭更多菜单
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      // 检查点击是否在菜单容器外（ref 包含按钮和菜单）
+      if (moreMenuRef.current && !moreMenuRef.current.contains(target)) {
+        console.log('Click outside detected, closing menu');
+        setMoreMenuOpen(false);
+      } else {
+        console.log('Click inside menu container, keeping menu open');
+      }
+    };
+    
+    // 延迟添加监听器，确保 React onClick 事件先处理
+    const timeoutId = setTimeout(() => {
+      console.log('Adding click outside listeners');
+      document.addEventListener('click', handleClickOutside, true);
+      document.addEventListener('touchend', handleClickOutside, true);
+    }, 100);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      console.log('Removing click outside listeners');
+      document.removeEventListener('click', handleClickOutside, true);
+      document.removeEventListener('touchend', handleClickOutside, true);
+    };
+  }, [moreMenuOpen]);
+
   // 手机端返回手势（后退）先关闭编辑器，再返回到登录页
   useEffect(() => {
     if (view !== "editor") return;
@@ -513,6 +648,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   if (view === 'editor') {
       return (
+        <>
           <div className={cn("fixed inset-0 bg-background z-50 flex flex-col h-[100dvh] animate-in slide-in-from-bottom-4 duration-300", zenMode && "bg-background")}>
               <header className={cn(
                 "px-2 sm:px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur shrink-0",
@@ -537,18 +673,20 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                   </div>
                   <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto scrollbar-hide flex-1 justify-end min-w-0">
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                      
+                      {/* 桌面端：显示所有按钮 */}
                       {!zenMode && (
                         <>
-                          <Button variant="ghost" size="icon" className="shrink-0" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
-                          <Button variant="ghost" size="icon" className="shrink-0" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
-                          <Button variant="ghost" size="icon" className="shrink-0" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
-                          <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0"></div>
+                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
+                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
+                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
+                          <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
                         </>
                       )}
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="shrink-0 px-1.5 sm:px-2 text-xs flex items-center gap-0.5 sm:gap-1"
+                        className="shrink-0 px-1.5 sm:px-2 text-xs flex items-center gap-0.5 sm:gap-1 hidden sm:flex"
                         disabled={!canRevert}
                         onClick={handleRevertToLastSaved}
                         title={!canRevert ? "无可撤回操作" : "撤回到上一步"}
@@ -556,11 +694,11 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         <RotateCcw className="w-3 h-3" />
                         <span className="hidden sm:inline">撤回</span>
                       </Button>
-                      <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0"></div>
+                      <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="shrink-0"
+                        className="shrink-0 hidden sm:flex"
                         title={zenMode ? "退出专注模式" : "进入专注模式"}
                         onClick={() => setZenMode((v) => !v)}
                       >
@@ -570,6 +708,104 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                           <Maximize2 className="w-4 h-4 text-muted-foreground" />
                         )}
                       </Button>
+                      
+                      {/* 移动端：更多菜单按钮 */}
+                      <div className="relative sm:hidden" ref={moreMenuRef}>
+                        <button
+                          type="button"
+                          className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('More button clicked! Current state:', moreMenuOpen);
+                            setMoreMenuOpen((prev) => {
+                              console.log('Setting state from', prev, 'to', !prev);
+                              return !prev;
+                            });
+                          }}
+                        >
+                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                        
+                        {/* 更多菜单弹出层 - 使用 Portal 避免被 overflow 裁剪 */}
+                        {moreMenuOpen && typeof document !== 'undefined' && (
+                          <div
+                            className="fixed right-2 w-48 rounded-lg border border-border bg-popover shadow-lg z-[100] py-1"
+                            style={{ 
+                              top: 'calc(3.5rem + 4px)',
+                              right: '0.5rem'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {!zenMode && (
+                              <>
+                                <button
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
+                                  onClick={() => {
+                                    fileInputRef.current?.click();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                >
+                                  <ImageIcon className="w-4 h-4" />
+                                  <span>插入图片</span>
+                                </button>
+                                <button
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
+                                  onClick={() => {
+                                    togglePin();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                >
+                                  <Pin className={cn("w-4 h-4", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "")} />
+                                  <span>{isPinned ? "取消置顶" : "置顶笔记"}</span>
+                                </button>
+                                <button
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
+                                  onClick={() => {
+                                    togglePublish();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                >
+                                  <Globe className={cn("w-4 h-4", isPublished ? "text-blue-500" : "")} />
+                                  <span>{isPublished ? "取消发布" : "发布到 Web"}</span>
+                                </button>
+                                <div className="h-[1px] bg-border my-1"></div>
+                              </>
+                            )}
+                            <button
+                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              disabled={!canRevert}
+                              onClick={() => {
+                                handleRevertToLastSaved();
+                                setMoreMenuOpen(false);
+                              }}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                              <span>撤回</span>
+                            </button>
+                            <button
+                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
+                              onClick={() => {
+                                setZenMode((v) => !v);
+                                setMoreMenuOpen(false);
+                              }}
+                            >
+                              {zenMode ? (
+                                <>
+                                  <Minimize2 className="w-4 h-4" />
+                                  <span>退出专注模式</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Maximize2 className="w-4 h-4" />
+                                  <span>进入专注模式</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* 编辑/预览切换（所有设备都显示） */}
                       <button onClick={() => setPreviewMode(!previewMode)} className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">编辑</span></> : <><Eye size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">预览</span></>}</button>
                       <div className="text-xs text-muted-foreground w-8 sm:w-12 text-right shrink-0">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
                   </div>
@@ -688,6 +924,32 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                   )}
               </div>
           </div>
+          
+          {/* 云端更新提示 Dialog */}
+          <Dialog open={cloudUpdateDialogOpen} onOpenChange={setCloudUpdateDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>云端有更新</DialogTitle>
+                <DialogDescription>
+                  检测到其他设备更新了这篇笔记。你可以选择刷新以查看最新内容，或保留当前编辑的内容。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={handleKeepLocalChanges}
+                >
+                  保留我的更改
+                </Button>
+                <Button
+                  onClick={handleRefreshFromCloud}
+                >
+                  刷新查看最新
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
       );
   }
 

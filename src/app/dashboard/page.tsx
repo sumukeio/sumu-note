@@ -199,19 +199,19 @@ export default function DashboardPage() {
             )}
           </section>
         ) : currentFolder ? (
-          // 👀 模式 B: 查看笔记
-          <NoteManager
-            userId={user.id}
-            folderId={currentFolder.id}
-            folderName={currentFolder.name}
-            onBack={() => setCurrentFolder(null)} // 返回到文件夹列表
-          />
+            // 👀 模式 B: 查看笔记
+            <NoteManager 
+                userId={user.id} 
+                folderId={currentFolder.id} 
+                folderName={currentFolder.name}
+                onBack={() => setCurrentFolder(null)} // 返回到文件夹列表
+            />
         ) : (
-          // 👀 模式 A: 查看文件夹列表 (默认)
-          <FolderManager
-            userId={user.id}
-            onEnterFolder={(id, name) => setCurrentFolder({ id, name })}
-          />
+            // 👀 模式 A: 查看文件夹列表 (默认)
+            <FolderManager 
+                userId={user.id} 
+                onEnterFolder={(id, name) => setCurrentFolder({ id, name })} 
+            />
         )}
       </main>
 
