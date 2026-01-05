@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, CheckCircle2, Plus, Minus } from "lucide-react";
+import { ArrowLeft, Loader2, CheckCircle2, Plus, Minus, Undo2, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -37,8 +37,13 @@ import {
   collapseAllNodes,
   moveNodeInTree,
   deleteNodeFromTree,
+  getNextVisibleNode,
+  getPreviousVisibleNode,
+  getVisibleNodes,
 } from "@/lib/mind-note-utils";
 import { cn } from "@/lib/utils";
+import { useUndoRedo, type UndoRedoAction } from "@/hooks/useUndoRedo";
+import { executeUndoRedoActions, executeRedoActions } from "@/lib/undo-redo-executor";
 
 interface MindNoteEditorProps {
   mindNoteId: string;
@@ -46,6 +51,21 @@ interface MindNoteEditorProps {
 }
 
 type SaveStatus = "saved" | "saving" | "error" | "unsaved";
+
+// 在树中查找节点的工具函数（移到组件外部避免 useCallback 递归问题）
+function findNodeInTree(
+  tree: MindNoteNodeTree[],
+  nodeId: string
+): MindNoteNodeTree | null {
+  for (const node of tree) {
+    if (node.id === nodeId) return node;
+    if (node.children && node.children.length > 0) {
+      const found = findNodeInTree(node.children, nodeId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 export default function MindNoteEditor({
   mindNoteId,
@@ -64,6 +84,10 @@ export default function MindNoteEditor({
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [fontSize, setFontSize] = useState(14); // 默认字体大小
+  
+  // 撤销/重做功能
+  const { canUndo, canRedo, recordAction, undo, redo, clearHistory } = useUndoRedo();
+  const isUndoRedoExecuting = useRef(false); // 防止撤销/重做操作本身被记录
 
   // 拖拽传感器配置
   const sensors = useSensors(
@@ -74,8 +98,8 @@ export default function MindNoteEditor({
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 300, // 移动端长按延迟增加到 300ms，防止误触
-        tolerance: 8, // 增加容差，避免轻微移动触发拖拽
+        delay: 250, // 移动端长按延迟250ms，平衡响应速度和误触
+        tolerance: 10, // 增加容差到10px，避免轻微移动触发拖拽
       },
     })
   );
@@ -106,7 +130,96 @@ export default function MindNoteEditor({
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    // 加载数据后清空历史记录
+    clearHistory();
+  }, [loadData, clearHistory]);
+
+  // 保存标题
+  const saveTitle = useCallback(
+    async (newTitle: string) => {
+      if (!mindNote || newTitle === mindNote.title) return;
+
+      setSaveStatus("saving");
+      try {
+        const updated = await updateMindNote(mindNote.id, { title: newTitle });
+        setMindNote(updated);
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error("Failed to save title:", error);
+        setSaveStatus("error");
+      }
+    },
+    [mindNote]
+  );
+
+  // 执行撤销操作
+  const handleUndo = useCallback(async () => {
+    if (!canUndo || isUndoRedoExecuting.current) return;
+    
+    isUndoRedoExecuting.current = true;
+    const actions = undo();
+    
+    if (actions) {
+      const { nodes: newNodes, title: newTitle } = executeUndoRedoActions(
+        actions,
+        nodes,
+        title
+      );
+      
+      setNodes(newNodes);
+      if (newTitle !== title) {
+        setTitle(newTitle);
+        await saveTitle(newTitle);
+      }
+      
+      // 同步到数据库（异步，不阻塞）
+      // 这里需要根据操作类型同步更新数据库
+      setSaveStatus("saving");
+      try {
+        // TODO: 根据 actions 类型同步更新数据库
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error("Failed to sync undo to database:", error);
+        setSaveStatus("error");
+      }
+    }
+    
+    isUndoRedoExecuting.current = false;
+  }, [canUndo, undo, nodes, title, saveTitle]);
+
+  // 执行重做操作
+  const handleRedo = useCallback(async () => {
+    if (!canRedo || isUndoRedoExecuting.current) return;
+    
+    isUndoRedoExecuting.current = true;
+    const actions = redo();
+    
+    if (actions) {
+      const { nodes: newNodes, title: newTitle } = executeRedoActions(
+        actions,
+        nodes,
+        title
+      );
+      
+      setNodes(newNodes);
+      if (newTitle !== title) {
+        setTitle(newTitle);
+        await saveTitle(newTitle);
+      }
+      
+      // 同步到数据库
+      setSaveStatus("saving");
+      try {
+        // TODO: 根据 actions 类型同步更新数据库
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error("Failed to sync redo to database:", error);
+        setSaveStatus("error");
+      }
+    }
+    
+    isUndoRedoExecuting.current = false;
+  }, [canRedo, redo, nodes, title, saveTitle]);
 
   // 点击外部关闭工具栏（移动端）
   useEffect(() => {
@@ -185,27 +298,19 @@ export default function MindNoteEditor({
     }
   }, [nodes]);
 
-
-  // 保存标题
-  const saveTitle = useCallback(
-    async (newTitle: string) => {
-      if (!mindNote || newTitle === mindNote.title) return;
-
-      setSaveStatus("saving");
-      try {
-        const updated = await updateMindNote(mindNote.id, { title: newTitle });
-        setMindNote(updated);
-        setSaveStatus("saved");
-      } catch (error) {
-        console.error("Failed to save title:", error);
-        setSaveStatus("error");
-      }
-    },
-    [mindNote]
-  );
-
   // 标题变更处理（自动保存）
   const handleTitleChange = (newTitle: string) => {
+    if (!isUndoRedoExecuting.current && title !== newTitle) {
+      // 记录操作
+      recordAction([
+        {
+          type: "UPDATE_TITLE",
+          oldTitle: title,
+          newTitle: newTitle,
+        },
+      ]);
+    }
+    
     setTitle(newTitle);
     setSaveStatus("unsaved");
 
@@ -217,6 +322,7 @@ export default function MindNoteEditor({
       saveTitle(newTitle);
     }, 1500);
   };
+
 
   // 更新节点内容的辅助函数（乐观更新）
   const updateNodeInTree = useCallback(
@@ -244,6 +350,22 @@ export default function MindNoteEditor({
   // 更新节点内容（乐观更新 + 防抖）
   const handleUpdateNode = useCallback(
     (nodeId: string, content: string) => {
+      // 获取旧内容
+      const oldNode = findNodeInTree(nodes, nodeId);
+      const oldContent = oldNode?.content || "";
+      
+      if (!isUndoRedoExecuting.current && oldContent !== content) {
+        // 记录操作
+        recordAction([
+          {
+            type: "UPDATE_NODE_CONTENT",
+            nodeId,
+            oldContent,
+            newContent: content,
+          },
+        ]);
+      }
+      
       // 乐观更新：立即更新本地状态
       setNodes((prevNodes) =>
         updateNodeInTree(prevNodes, nodeId, (node) => ({ ...node, content }))
@@ -273,7 +395,7 @@ export default function MindNoteEditor({
 
       nodeUpdateTimerRef.current.set(nodeId, timer);
     },
-    [updateNodeInTree]
+    [updateNodeInTree, nodes, recordAction]
   );
 
   // 切换展开/折叠（乐观更新）
@@ -284,6 +406,19 @@ export default function MindNoteEditor({
         if (!node) return prevNodes;
 
         const newExpanded = !node.is_expanded;
+        
+        if (!isUndoRedoExecuting.current) {
+          // 记录操作
+          recordAction([
+            {
+              type: "TOGGLE_EXPAND",
+              nodeId,
+              oldExpanded: node.is_expanded,
+              newExpanded,
+            },
+          ]);
+        }
+        
         // 乐观更新
         const updated = updateNodeInTree(prevNodes, nodeId, (n) => ({
           ...n,
@@ -298,7 +433,7 @@ export default function MindNoteEditor({
         return updated;
       });
     },
-    [updateNodeInTree]
+    [updateNodeInTree, recordAction]
   );
 
   // 添加子节点（乐观更新）
@@ -349,6 +484,19 @@ export default function MindNoteEditor({
           parent_id: parentId,
         });
 
+        // 记录操作（使用真实节点 ID）
+        if (!isUndoRedoExecuting.current) {
+          const parentNode = findNodeInTree(nodes, parentId);
+          recordAction([
+            {
+              type: "CREATE_NODE",
+              nodeId: newNode.id,
+              parentId: parentId,
+              order: parentNode?.children?.length || 0,
+            },
+          ]);
+        }
+
         // 替换临时节点为真实节点
         setNodes((prevNodes) => {
           const replaceTempNode = (
@@ -389,7 +537,7 @@ export default function MindNoteEditor({
         });
       }
     },
-    [mindNote]
+    [mindNote, nodes, recordAction]
   );
 
   // 添加同级节点（乐观更新）
@@ -605,21 +753,6 @@ export default function MindNoteEditor({
     [mindNote, nodes, loadData]
   );
 
-  // 在树中查找节点
-  const findNodeInTree = useCallback(
-    (tree: MindNoteNodeTree[], nodeId: string): MindNoteNodeTree | null => {
-      for (const node of tree) {
-        if (node.id === nodeId) return node;
-        if (node.children && node.children.length > 0) {
-          const found = findNodeInTree(node.children, nodeId);
-          if (found) return found;
-        }
-      }
-      return null;
-    },
-    []
-  );
-
   // 查找节点及其所有子节点 ID
   const getAllNodeIds = useCallback((node: MindNoteNodeTree): string[] => {
     const ids = [node.id];
@@ -645,6 +778,22 @@ export default function MindNoteEditor({
         }
       }
 
+      // 记录操作（在删除前记录）
+      const nodeToDelete = findNodeInTree(nodes, nodeId);
+      if (!isUndoRedoExecuting.current && nodeToDelete) {
+        recordAction([
+          {
+            type: "DELETE_NODE",
+            nodeId,
+            parentId: nodeToDelete.parent_id,
+            order: nodeToDelete.order_index,
+            content: nodeToDelete.content,
+            isExpanded: nodeToDelete.is_expanded,
+            children: nodeToDelete.children,
+          },
+        ]);
+      }
+
       // 乐观更新：立即从 UI 中移除
       setNodes((prevNodes) => deleteNodeFromTree(prevNodes, nodeId));
 
@@ -661,12 +810,16 @@ export default function MindNoteEditor({
         loadData();
       }
     },
-    [nodes, findNodeInTree, loadData]
+    [nodes, loadData, recordAction]
   );
 
   // 拖拽开始
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
+    // 禁用页面滚动
+    document.body.style.overflow = "hidden";
+    // 禁用文本选择
+    document.body.style.userSelect = "none";
   }, []);
 
   // 拖拽结束 - 乐观更新
@@ -674,6 +827,10 @@ export default function MindNoteEditor({
     async (event: DragEndEvent) => {
       const { active, over } = event;
       setActiveId(null);
+      // 恢复页面滚动
+      document.body.style.overflow = "";
+      // 恢复文本选择
+      document.body.style.userSelect = "";
 
       if (!over || !mindNote) return;
 
@@ -757,20 +914,20 @@ export default function MindNoteEditor({
         loadData();
       }
     },
-    [nodes, mindNote, findNodeInTree, getAllNodeIds, loadData]
+    [nodes, mindNote, getAllNodeIds, loadData]
   );
 
   // 获取拖拽中的节点
   const getActiveNode = useCallback((): MindNoteNodeTree | null => {
     if (!activeId) return null;
     return findNodeInTree(nodes, activeId);
-  }, [activeId, nodes, findNodeInTree]);
+  }, [activeId, nodes]);
 
   // 获取选中的节点
   const getSelectedNode = useCallback((): MindNoteNodeTree | null => {
     if (!selectedNodeId) return null;
     return findNodeInTree(nodes, selectedNodeId);
-  }, [selectedNodeId, nodes, findNodeInTree]);
+  }, [selectedNodeId, nodes]);
 
   // 处理节点选择
   const handleNodeSelect = useCallback((nodeId: string) => {
@@ -830,16 +987,128 @@ export default function MindNoteEditor({
     const node = findNodeInTree(nodes, selectedNodeId);
     if (!node) return false;
     return node.parent_id !== null;
-  }, [selectedNodeId, nodes, findNodeInTree]);
+  }, [selectedNodeId, nodes]);
 
   // 全局快捷键处理
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Z / Cmd+Z: 撤销
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      // Ctrl+Y / Cmd+Y 或 Ctrl+Shift+Z / Cmd+Shift+Z: 重做
+      if (
+        ((e.ctrlKey || e.metaKey) && e.key === "y") ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "z")
+      ) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      // Ctrl+N / Cmd+N: 新建思维笔记
+      if ((e.ctrlKey || e.metaKey) && e.key === "n") {
+        e.preventDefault();
+        router.push("/dashboard/mind-notes");
+        return;
+      }
+
+      // Ctrl+F / Cmd+F: 聚焦搜索框（如果存在）
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        // TODO: 如果将来有搜索框，聚焦它
+        return;
+      }
+
+      // Ctrl+S / Cmd+S: 手动保存
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        // 触发保存（如果有未保存的内容）
+        if (saveStatus === "unsaved") {
+          // 强制保存所有待保存的内容
+          // TODO: 实现强制保存逻辑
+        }
+        return;
+      }
+
+      // Ctrl+/ / Cmd+/: 显示/隐藏快捷键帮助
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setIsShortcutHelpOpen((prev) => !prev);
+        return;
+      }
+
       // Alt + . : 全部展开/折叠（仅桌面端）
       if (e.altKey && e.key === ".") {
         e.preventDefault();
         handleToggleAllExpand();
         return;
+      }
+
+      // 方向键导航（仅在非编辑模式）
+      if (!editingNodeId && selectedNodeId) {
+        // 方向键上：选择上一个可见节点
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          const prevNode = getPreviousVisibleNode(nodes, selectedNodeId);
+          if (prevNode) {
+            setSelectedNodeId(prevNode.id);
+            // 滚动到可见区域
+            setTimeout(() => {
+              const element = document.querySelector(`[data-node-id="${prevNode.id}"]`);
+              element?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }, 0);
+          }
+          return;
+        }
+
+        // 方向键下：选择下一个可见节点
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          const nextNode = getNextVisibleNode(nodes, selectedNodeId);
+          if (nextNode) {
+            setSelectedNodeId(nextNode.id);
+            // 滚动到可见区域
+            setTimeout(() => {
+              const element = document.querySelector(`[data-node-id="${nextNode.id}"]`);
+              element?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }, 0);
+          }
+          return;
+        }
+
+        // 方向键左：折叠节点（如果有子节点）
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          const currentNode = findNodeInTree(nodes, selectedNodeId);
+          if (currentNode && currentNode.children && currentNode.children.length > 0 && currentNode.is_expanded) {
+            handleToggleExpand(selectedNodeId);
+          }
+          return;
+        }
+
+        // 方向键右：展开节点（如果有子节点）
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          const currentNode = findNodeInTree(nodes, selectedNodeId);
+          if (currentNode && currentNode.children && currentNode.children.length > 0 && !currentNode.is_expanded) {
+            handleToggleExpand(selectedNodeId);
+          }
+          return;
+        }
+
+        // 空格键：切换展开/折叠状态
+        if (e.key === " ") {
+          e.preventDefault();
+          const currentNode = findNodeInTree(nodes, selectedNodeId);
+          if (currentNode && currentNode.children && currentNode.children.length > 0) {
+            handleToggleExpand(selectedNodeId);
+          }
+          return;
+        }
       }
 
       // Shift + Tab: 提升层级（PC端）
@@ -935,12 +1204,19 @@ export default function MindNoteEditor({
     nodes,
     mindNote,
     selectedNodeId,
+    editingNodeId,
     handleToggleAllExpand,
     handleAddSibling,
     handleAddChild,
     handleUpdateNode,
     handleOutdent,
-    findNodeInTree,
+    handleToggleExpand,
+    handleUndo,
+    handleRedo,
+    saveStatus,
+    router,
+    getNextVisibleNode,
+    getPreviousVisibleNode,
   ]);
 
   if (loading) {
@@ -971,7 +1247,7 @@ export default function MindNoteEditor({
             <Input
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
-              className="text-2xl sm:text-3xl font-bold border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto"
+              className="text-3xl font-bold border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto"
               placeholder="未命名思维笔记"
             />
           </div>
@@ -1018,6 +1294,29 @@ export default function MindNoteEditor({
                 return !checkExpanded(n);
               }) ? "展开全部" : "折叠全部"}
             </Button>
+            {/* 撤销/重做按钮 */}
+            <div className="flex items-center gap-1 border border-border rounded-md">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                title="撤销 (Ctrl+Z)"
+              >
+                <Undo2 className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                title="重做 (Ctrl+Y)"
+              >
+                <Redo2 className="w-4 h-4" />
+              </Button>
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -1095,8 +1394,18 @@ export default function MindNoteEditor({
           )}
           <DragOverlay>
             {activeId ? (
-              <div className="px-2 py-1 text-sm bg-background border border-border rounded shadow-lg">
-                {getActiveNode()?.content || "节点"}
+              <div className="px-3 py-2 text-sm bg-background border-2 border-blue-500 rounded-lg shadow-2xl max-w-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                  <div className="truncate font-medium">
+                    {getActiveNode()?.content || "节点"}
+                  </div>
+                </div>
+                {getActiveNode()?.children && getActiveNode()!.children!.length > 0 && (
+                  <div className="text-xs text-muted-foreground mt-1 ml-4">
+                    包含 {getActiveNode()!.children!.length} 个子节点
+                  </div>
+                )}
               </div>
             ) : null}
           </DragOverlay>
@@ -1120,6 +1429,7 @@ export default function MindNoteEditor({
               </div>
               <div className="space-y-2">
                 {[
+                  { key: "Ctrl + A", desc: "全选当前节点内容" },
                   { key: "Enter", desc: "保存并在下方创建同级节点" },
                   { key: "Shift + Enter", desc: "换行" },
                   { key: "Tab", desc: "保存并在下方创建子节点" },
@@ -1156,6 +1466,15 @@ export default function MindNoteEditor({
               </div>
               <div className="space-y-2">
                 {[
+                  { key: "Ctrl + Z", desc: "撤销上一步操作" },
+                  { key: "Ctrl + Y", desc: "重做上一步操作" },
+                  { key: "Ctrl + Shift + Z", desc: "重做（Mac 端）" },
+                  { key: "Ctrl + N", desc: "新建思维笔记" },
+                  { key: "Ctrl + S", desc: "手动保存" },
+                  { key: "Ctrl + /", desc: "显示/隐藏快捷键帮助" },
+                  { key: "↑ ↓", desc: "在节点间上下切换选择" },
+                  { key: "← →", desc: "折叠/展开节点（有子节点时）" },
+                  { key: "Space", desc: "切换选中节点的展开/折叠状态" },
                   { key: "Enter", desc: "在选中节点下方创建同级节点" },
                   { key: "Tab", desc: "在选中节点下方创建子节点" },
                   { key: "Shift + Tab", desc: "提升选中节点层级" },

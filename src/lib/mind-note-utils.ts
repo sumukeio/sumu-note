@@ -35,6 +35,9 @@ export function buildNodeTree(nodes: MindNoteNode[]): MindNoteNodeTree[] {
     }
   });
 
+  // 对根节点按 order_index 排序
+  rootNodes.sort((a, b) => a.order_index - b.order_index);
+
   // 对每个节点的 children 按 order_index 排序
   const sortChildren = (node: MindNoteNodeTree) => {
     if (node.children && node.children.length > 0) {
@@ -457,5 +460,62 @@ export function collapseAllNodes(tree: MindNoteNodeTree[]): void {
     });
   };
   collapse(tree);
+}
+
+/**
+ * 获取所有可见节点的扁平列表（用于方向键导航）
+ * 只包含展开节点的可见子节点
+ */
+export function getVisibleNodes(
+  tree: MindNoteNodeTree[]
+): MindNoteNodeTree[] {
+  const result: MindNoteNodeTree[] = [];
+  
+  const traverse = (nodes: MindNoteNodeTree[]) => {
+    nodes.forEach((node) => {
+      result.push(node);
+      // 如果节点展开且有子节点，递归遍历子节点
+      if (node.is_expanded && node.children && node.children.length > 0) {
+        traverse(node.children);
+      }
+    });
+  };
+  
+  traverse(tree);
+  return result;
+}
+
+/**
+ * 获取节点的下一个可见节点（用于方向键下）
+ */
+export function getNextVisibleNode(
+  tree: MindNoteNodeTree[],
+  currentNodeId: string
+): MindNoteNodeTree | null {
+  const visibleNodes = getVisibleNodes(tree);
+  const currentIndex = visibleNodes.findIndex((n) => n.id === currentNodeId);
+  
+  if (currentIndex === -1 || currentIndex === visibleNodes.length - 1) {
+    return null;
+  }
+  
+  return visibleNodes[currentIndex + 1];
+}
+
+/**
+ * 获取节点的上一个可见节点（用于方向键上）
+ */
+export function getPreviousVisibleNode(
+  tree: MindNoteNodeTree[],
+  currentNodeId: string
+): MindNoteNodeTree | null {
+  const visibleNodes = getVisibleNodes(tree);
+  const currentIndex = visibleNodes.findIndex((n) => n.id === currentNodeId);
+  
+  if (currentIndex <= 0) {
+    return null;
+  }
+  
+  return visibleNodes[currentIndex - 1];
 }
 

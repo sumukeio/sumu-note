@@ -177,6 +177,15 @@ export default function DraggableMindNode({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     
+    // Ctrl+A / Cmd+A: 全选当前节点内容
+    if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+      e.preventDefault();
+      if (textareaRef.current) {
+        textareaRef.current.select();
+      }
+      return;
+    }
+    
     // Shift + Enter: 换行（默认行为）
     if (e.shiftKey && e.key === "Enter") {
       return; // 允许换行
@@ -345,8 +354,8 @@ export default function DraggableMindNode({
       <div
         ref={setChildDroppableRef}
         className={cn(
-          "absolute left-0 right-0 top-0 h-1/2 z-10 pointer-events-none",
-          isOverAsChild && !isDragging && "pointer-events-auto bg-green-500/20 border-t-2 border-green-500"
+          "absolute left-0 right-0 top-0 h-1/2 z-10 pointer-events-none transition-all",
+          isOverAsChild && !isDragging && "pointer-events-auto bg-green-500/30 border-t-2 border-green-500 shadow-lg"
         )}
         style={{ paddingLeft: `${indentLevel * 1.5}rem` }}
       />
@@ -355,8 +364,8 @@ export default function DraggableMindNode({
       <div
         ref={setSiblingDroppableRef}
         className={cn(
-          "absolute left-0 right-0 bottom-0 h-1/2 z-10 pointer-events-none",
-          isOverAsSibling && !isDragging && "pointer-events-auto bg-blue-500/20 border-b-2 border-blue-500"
+          "absolute left-0 right-0 bottom-0 h-1/2 z-10 pointer-events-none transition-all",
+          isOverAsSibling && !isDragging && "pointer-events-auto bg-blue-500/30 border-b-2 border-blue-500 shadow-lg"
         )}
         style={{ paddingLeft: `${indentLevel * 1.5}rem` }}
       />
@@ -367,14 +376,14 @@ export default function DraggableMindNode({
         style={{ paddingLeft: `${indentLevel * 1.5}rem`, fontSize: `${fontSize}px` }}
         onClick={handleClick}
         className={cn(
-          "flex items-center py-0.5 pr-2 cursor-pointer relative z-0",
+          "flex items-center py-0.5 pr-2 cursor-pointer relative z-0 transition-colors",
           isDragging && "z-50 opacity-50",
-          isSelected && "bg-muted/30"
+          isSelected && "bg-muted/30 ring-1 ring-blue-500/50"
         )}
       >
         {/* 展开/折叠按钮 + 黑色圆点（飞书风格交互） */}
         {hasChildren ? (
-          <div className="relative flex items-center mr-1 group/caret">
+          <div className="relative flex items-center group/caret">
             {/* 提示气泡：仅在靠近折叠标志时显示 */}
             <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-1 rounded-lg bg-black text-white text-[11px] leading-none shadow-md opacity-0 group-hover/caret:opacity-100 transition-opacity whitespace-nowrap">
               {node.is_expanded ? "折叠" : "展开"}
@@ -385,7 +394,7 @@ export default function DraggableMindNode({
                 e.stopPropagation();
                 onToggleExpand?.(node.id);
               }}
-              className="w-6 h-6 flex items-center justify-center shrink-0 rounded-full bg-muted/0 hover:bg-muted/70 transition-colors opacity-0 group-hover/caret:opacity-100"
+              className="w-6 h-6 flex items-center justify-center shrink-0 rounded-full bg-muted/0 hover:bg-muted/70 transition-colors opacity-0 group-hover/caret:opacity-100 -ml-1"
               aria-label={node.is_expanded ? "折叠" : "展开"}
             >
               {node.is_expanded ? (
@@ -394,23 +403,27 @@ export default function DraggableMindNode({
                 <ChevronRight className="w-3 h-3 text-muted-foreground/80" />
               )}
             </button>
-            {/* 黑色圆点：拖拽手柄 */}
+            {/* 黑色圆点：拖拽手柄 - 固定位置，确保所有节点对齐 */}
             <div
               {...listeners}
               {...attributes}
               data-drag-handle
-              className="w-2 h-2 rounded-full bg-neutral-900 ml-1 cursor-grab active:cursor-grabbing touch-none"
+              className="w-2 h-2 rounded-full bg-neutral-900 cursor-grab active:cursor-grabbing touch-none shrink-0"
+              style={{ marginLeft: '0.25rem', marginRight: '0.25rem' }}
               title="拖拽移动"
             />
           </div>
         ) : (
-          <div className="flex items-center mr-1">
-            {/* 黑色圆点：拖拽手柄 */}
+          <div className="flex items-center">
+            {/* 占位空间，确保圆点位置与有子节点时一致 */}
+            <div className="w-6 h-6 shrink-0" />
+            {/* 黑色圆点：拖拽手柄 - 固定位置，确保所有节点对齐 */}
             <div
               {...listeners}
               {...attributes}
               data-drag-handle
-              className="w-2 h-2 rounded-full bg-neutral-900 mr-1 cursor-grab active:cursor-grabbing touch-none"
+              className="w-2 h-2 rounded-full bg-neutral-900 cursor-grab active:cursor-grabbing touch-none shrink-0"
+              style={{ marginLeft: '0.25rem', marginRight: '0.25rem' }}
               title="拖拽移动"
             />
           </div>
@@ -511,7 +524,11 @@ export default function DraggableMindNode({
           ref={verticalLineRef}
           className="absolute w-px bg-neutral-900 pointer-events-none"
           style={{
-            left: `${indentLevel * 1.5}rem`, // 与内容缩进对齐，保证垂直
+            // 圆点中心位置计算：
+            // paddingLeft (indentLevel * 1.5rem) + 占位空间(1.5rem) + 圆点左边距(0.25rem) + 圆点宽度的一半(0.125rem)
+            // = indentLevel * 1.5rem + 1.5rem + 0.25rem + 0.125rem
+            // = indentLevel * 1.5rem + 1.875rem
+            left: `${indentLevel * 1.5 + 1.875}rem`,
             top: "50%", // 从圆点位置开始
             height: "0px", // 初始高度为 0，由 useEffect 动态计算
             display: "none",

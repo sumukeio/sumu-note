@@ -144,3 +144,4 @@ CREATE POLICY "Users can delete their own mind note nodes"
 -- SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('mind_notes', 'mind_note_nodes');
 
 
+

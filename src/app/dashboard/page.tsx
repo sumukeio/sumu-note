@@ -110,15 +110,27 @@ export default function DashboardPage() {
               />
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard/mind-notes">
-              <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
+          <div className="flex items-center gap-2">
+            {/* 桌面端：文字按钮 */}
+            <Link href="/dashboard/mind-notes" className="hidden sm:inline-flex">
+              <Button variant="ghost" size="sm">
                 思维笔记
               </Button>
             </Link>
-            <Link href="/dashboard/stats">
-              <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
+            <Link href="/dashboard/stats" className="hidden sm:inline-flex">
+              <Button variant="ghost" size="sm">
                 统计
+              </Button>
+            </Link>
+            {/* 手机端：图标按钮，保持导航简洁 */}
+            <Link href="/dashboard/mind-notes" className="sm:hidden">
+              <Button variant="ghost" size="icon" aria-label="思维笔记">
+                🧠
+              </Button>
+            </Link>
+            <Link href="/dashboard/stats" className="sm:hidden">
+              <Button variant="ghost" size="icon" aria-label="统计">
+                📊
               </Button>
             </Link>
             <Button
