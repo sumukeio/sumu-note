@@ -107,18 +107,39 @@ export async function createMindNote(
 /**
  * 获取用户的所有思维笔记
  */
+export interface MindNoteQueryOptions {
+  folderId?: string | null;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface MindNoteListResult {
+  notes: MindNote[];
+  total: number;
+}
+
 export async function getMindNotes(
   userId: string,
-  folderId?: string | null
-): Promise<MindNote[]> {
+  options: MindNoteQueryOptions = {}
+): Promise<MindNoteListResult> {
+  const {
+    folderId,
+    search = "",
+    page = 1,
+    pageSize = 20,
+  } = options;
+
   let query = supabase
     .from("mind_notes")
-    .select("*")
+    .select(
+      "id,user_id,title,root_node_id,folder_id,created_at,updated_at,is_deleted",
+      { count: "exact" }
+    )
     .eq("user_id", userId)
     .eq("is_deleted", false);
 
-  // 如果指定了 folderId，筛选该文件夹下的笔记
-  // folderId 为 null 时，获取根目录的笔记
+  // 文件夹过滤
   if (folderId !== undefined) {
     if (folderId === null) {
       query = query.is("folder_id", null);
@@ -127,14 +148,26 @@ export async function getMindNotes(
     }
   }
 
-  const { data, error } = await query.order("updated_at", { ascending: false });
+  // 搜索（标题）
+  if (search.trim()) {
+    query = query.ilike("title", `%${search.trim()}%`);
+  }
+
+  // 排序 & 分页
+  const offset = (page - 1) * pageSize;
+  query = query.order("updated_at", { ascending: false }).range(offset, offset + pageSize - 1);
+
+  const { data, error, count } = await query;
 
   if (error) {
     console.error("Failed to fetch mind notes:", error);
     throw new Error(error.message || "获取思维笔记列表失败");
   }
 
-  return (data || []) as MindNote[];
+  return {
+    notes: (data || []) as MindNote[],
+    total: typeof count === "number" ? count : (data?.length ?? 0),
+  };
 }
 
 /**

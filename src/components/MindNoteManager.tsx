@@ -24,6 +24,8 @@ import {
   deleteMindNote,
   createMindNote,
   updateMindNote,
+  type MindNoteListResult,
+  type MindNoteQueryOptions,
   type MindNote,
 } from "@/lib/mind-note-storage";
 import {
@@ -286,6 +288,10 @@ export default function MindNoteManager({
   const [mindNotes, setMindNotes] = useState<MindNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [notesTotal, setNotesTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState<"create_folder" | "create_note" | "rename_folder" | "rename_note">("create_folder");
@@ -315,11 +321,17 @@ export default function MindNoteManager({
     if (data) setFolders(data);
   };
 
-  // 获取思维笔记列表
+  // 获取思维笔记列表（分页 + 后端搜索）
   const fetchMindNotes = async () => {
     try {
-      const notes = await getMindNotes(userId, folderId);
+      const { notes, total }: MindNoteListResult = await getMindNotes(userId, {
+        folderId: folderId === undefined ? undefined : folderId,
+        search: debouncedSearch,
+        page,
+        pageSize,
+      } as MindNoteQueryOptions);
       setMindNotes(notes);
+      setNotesTotal(total);
     } catch (error) {
       console.error("Failed to fetch mind notes:", error);
     }
@@ -334,7 +346,16 @@ export default function MindNoteManager({
     if (userId) {
       loadData();
     }
-  }, [userId, folderId]);
+  }, [userId, folderId, debouncedSearch, page]);
+
+  // 搜索防抖
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1); // 搜索切换时重置页码
+      setDebouncedSearch(searchQuery.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const handleCreateFolder = () => {
     setEditMode("create_folder");
@@ -588,10 +609,8 @@ export default function MindNoteManager({
     return folder.name.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
-  const filteredNotes = mindNotes.filter((note) => {
-    if (!searchQuery) return true;
-    return (note.title || "").toLowerCase().includes(searchQuery.toLowerCase());
-  });
+  // Notes 已经后端过滤，这里不再二次过滤
+  const filteredNotes = mindNotes;
 
   if (loading) {
     return (
@@ -623,7 +642,7 @@ export default function MindNoteManager({
               )}
               <h1 className="text-lg font-bold">{folderName || "思维笔记"}</h1>
               <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">
-                {folders.length + mindNotes.length}
+                {notesTotal}
               </span>
             </div>
             <div className="flex gap-2 items-center">
@@ -704,6 +723,29 @@ export default function MindNoteManager({
               )}
             </div>
           )}
+        </div>
+
+        {/* 分页 */}
+        <div className="flex items-center justify-center gap-3 py-4">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            上一页
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            第 {page} 页 / 共 {Math.max(1, Math.ceil(notesTotal / pageSize))} 页
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= Math.ceil(notesTotal / pageSize)}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            下一页
+          </Button>
         </div>
 
         {/* Dock 工具栏 */}

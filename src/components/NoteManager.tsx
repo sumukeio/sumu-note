@@ -147,10 +147,11 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [cloudUpdateDialogOpen, setCloudUpdateDialogOpen] = useState(false);
   const [cloudUpdateNote, setCloudUpdateNote] = useState<any>(null);
   const [refreshConfirmDialogOpen, setRefreshConfirmDialogOpen] = useState(false); // 刷新确认对话框
-  const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳
+  const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳（服务器返回）
   const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
   const isSavingRef = useRef<boolean>(false); // 标记是否正在保存（用于忽略自己的更新事件）
   const lastSaveTimeRef = useRef<number>(0); // 记录最后一次保存的时间（毫秒时间戳）
+  const pendingSelfUpdateRef = useRef<string | null>(null); // 记录一次自更新的 updated_at，用于首次实时事件直接忽略
   
   // 版本历史相关状态
   const [versionHistoryDialogOpen, setVersionHistoryDialogOpen] = useState(false);
@@ -276,7 +277,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       // 如果在线，尝试直接保存到 Supabase
       if (online) {
         // 首次尝试：包含 tags 字段
-        let { error } = await supabase
+        let { data: updatedRow, error } = await supabase
           .from("notes")
           .update({
             title: finalTitle,
@@ -287,9 +288,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             tags: currentTags.join(","),
             updated_at: now.toISOString(),
           })
-          .eq("id", currentNote.id);
+          .eq("id", currentNote.id)
+          .select("updated_at")
+          .single();
 
         // 检查是否是网络错误
+        let retryData: { updated_at?: string } | null = null;
         if (error) {
           const errorMessage = error.message || String(error);
           isNetworkError = errorMessage.includes("Failed to fetch") || 
@@ -310,8 +314,11 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             is_published: published,
               updated_at: now.toISOString(),
             })
-            .eq("id", currentNote.id);
+            .eq("id", currentNote.id)
+            .select("updated_at")
+            .single();
           error = retry.error;
+          retryData = retry.data as any;
           
           // 再次检查是否是网络错误
           if (error) {
@@ -326,7 +333,13 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
         if (!error) {
           setSaveStatus("saved");
           // 记录保存时间戳，用于检测云端更新
-          lastSavedTimestampRef.current = now.toISOString();
+          const latestUpdatedAt =
+            (retryData?.updated_at as string | undefined) ||
+            (updatedRow?.updated_at as string | undefined) ||
+            now.toISOString();
+          lastSavedTimestampRef.current = latestUpdatedAt;
+          pendingSelfUpdateRef.current = latestUpdatedAt;
+          lastSaveTimeRef.current = new Date(latestUpdatedAt).getTime();
           
           // 延迟清除保存标记，确保实时订阅事件能够被正确过滤（2秒后）
           setTimeout(() => {
@@ -639,12 +652,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           const updatedAt = updatedNote.updated_at;
           const updatedAtTimestamp = new Date(updatedAt).getTime();
           
+          // 如果是刚刚自己保存的同一条 updated_at，直接忽略一次
+          if (pendingSelfUpdateRef.current && updatedAt === pendingSelfUpdateRef.current) {
+            pendingSelfUpdateRef.current = null;
+            return;
+          }
+          
           // 如果正在保存，忽略这个事件（可能是自己触发的）
           if (isSavingRef.current) {
-            // 检查是否是最近2秒内的更新（可能是自己的保存操作）
             const timeSinceLastSave = updatedAtTimestamp - lastSaveTimeRef.current;
             if (timeSinceLastSave >= 0 && timeSinceLastSave < 2000) {
-              // 很可能是自己的保存操作，忽略
               return;
             }
           }
@@ -655,13 +672,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             updatedAt !== lastSavedTimestampRef.current &&
             updatedAtTimestamp > new Date(lastSavedTimestampRef.current).getTime()
           ) {
-            // 再次检查时间差，避免误判（如果时间差小于2秒，可能是自己的更新）
-            const timeSinceLastSave = updatedAtTimestamp - lastSaveTimeRef.current;
-            if (timeSinceLastSave >= 2000) {
-              // 检测到云端有更新（至少2秒前的更新，不是自己的）
-              setCloudUpdateNote(updatedNote);
-              setCloudUpdateDialogOpen(true);
-            }
+            setCloudUpdateNote(updatedNote);
+            setCloudUpdateDialogOpen(true);
           }
         }
       )
