@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useRouter } from 'next/navigation';
 import MindNoteEditor from '@/components/MindNoteEditor';
 import * as mindNoteStorage from '@/lib/mind-note-storage';
 
@@ -202,22 +203,15 @@ describe('MindNoteEditor Component', () => {
   });
 
   it('应该在笔记不存在时重定向', async () => {
-    const mockRouter = {
-      push: vi.fn(),
-      replace: vi.fn(),
-      refresh: vi.fn(),
-    };
-
-    vi.mock('next/navigation', () => ({
-      useRouter: () => mockRouter,
-    }));
+    const mockRouter = useRouter() as any;
+    const pushSpy = vi.spyOn(mockRouter, 'push');
 
     (mindNoteStorage.getMindNoteById as any).mockResolvedValue(null);
 
     render(<MindNoteEditor mindNoteId={mockMindNoteId} userId={mockUserId} />);
 
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalledWith('/dashboard/mind-notes');
+      expect(pushSpy).toHaveBeenCalledWith('/dashboard/mind-notes');
     });
   });
 
@@ -248,4 +242,6 @@ describe('MindNoteEditor Component', () => {
     // 应该显示错误状态（根据实际实现）
   });
 });
+
+
 

@@ -149,6 +149,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [refreshConfirmDialogOpen, setRefreshConfirmDialogOpen] = useState(false); // 刷新确认对话框
   const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳
   const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
+  const isSavingRef = useRef<boolean>(false); // 标记是否正在保存（用于忽略自己的更新事件）
+  const lastSaveTimeRef = useRef<number>(0); // 记录最后一次保存的时间（毫秒时间戳）
   
   // 版本历史相关状态
   const [versionHistoryDialogOpen, setVersionHistoryDialogOpen] = useState(false);
@@ -256,6 +258,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       if (!currentNote) return; 
       setSaveStatus('saving'); 
       const now = new Date(); 
+      const nowTimestamp = now.getTime();
+      
+      // 标记正在保存，忽略接下来的实时订阅事件（2秒内）
+      isSavingRef.current = true;
+      lastSaveTimeRef.current = nowTimestamp;
+      
       let finalTitle = currentTitle;
       if (!finalTitle.trim()) {
           finalTitle = currentContent.split('\n')[0]?.replace(/[#*`]/g, '').trim().slice(0, 30) || "";
@@ -320,6 +328,11 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           // 记录保存时间戳，用于检测云端更新
           lastSavedTimestampRef.current = now.toISOString();
           
+          // 延迟清除保存标记，确保实时订阅事件能够被正确过滤（2秒后）
+          setTimeout(() => {
+            isSavingRef.current = false;
+          }, 2000);
+          
           // 创建版本历史（异步，不阻塞保存流程）
           createNoteVersion(currentNote.id, userId, finalTitle, currentContent, currentTags).catch(err => {
             console.warn("Failed to create note version:", err);
@@ -339,14 +352,20 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
               operation: "update",
             });
             setSaveStatus("saved"); // 显示为已保存，但实际是离线保存
+            // 离线保存也记录时间戳，但不需要延迟清除（因为不会触发实时订阅）
+            lastSavedTimestampRef.current = now.toISOString();
+            lastSaveTimeRef.current = nowTimestamp;
+            isSavingRef.current = false;
             console.log("[NoteManager] 笔记已保存到本地（离线模式）");
           } catch (err) {
             console.error("[NoteManager] 离线保存失败：", err);
             setSaveStatus("error");
+            isSavingRef.current = false;
           }
         } else {
           console.error("[NoteManager] 保存笔记失败：", error.message || error);
           setSaveStatus("error");
+          isSavingRef.current = false;
         }
       } else {
         // 离线模式：保存到 IndexedDB
@@ -362,10 +381,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             operation: "update",
           });
           setSaveStatus("saved"); // 显示为已保存，但实际是离线保存
+          // 离线保存也记录时间戳
+          lastSavedTimestampRef.current = now.toISOString();
+          lastSaveTimeRef.current = nowTimestamp;
+          isSavingRef.current = false;
           console.log("[NoteManager] 笔记已保存到本地（离线模式）");
         } catch (err) {
           console.error("[NoteManager] 离线保存失败：", err);
           setSaveStatus("error");
+          isSavingRef.current = false;
         }
       }
   }, [currentNote, userId]);
@@ -613,16 +637,31 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
         (payload) => {
           const updatedNote = payload.new as any;
           const updatedAt = updatedNote.updated_at;
+          const updatedAtTimestamp = new Date(updatedAt).getTime();
+          
+          // 如果正在保存，忽略这个事件（可能是自己触发的）
+          if (isSavingRef.current) {
+            // 检查是否是最近2秒内的更新（可能是自己的保存操作）
+            const timeSinceLastSave = updatedAtTimestamp - lastSaveTimeRef.current;
+            if (timeSinceLastSave >= 0 && timeSinceLastSave < 2000) {
+              // 很可能是自己的保存操作，忽略
+              return;
+            }
+          }
           
           // 如果这次更新不是我们自己保存的（时间戳不同），则提示用户
           if (
             lastSavedTimestampRef.current &&
             updatedAt !== lastSavedTimestampRef.current &&
-            new Date(updatedAt).getTime() > new Date(lastSavedTimestampRef.current).getTime()
+            updatedAtTimestamp > new Date(lastSavedTimestampRef.current).getTime()
           ) {
-            // 检测到云端有更新
-            setCloudUpdateNote(updatedNote);
-            setCloudUpdateDialogOpen(true);
+            // 再次检查时间差，避免误判（如果时间差小于2秒，可能是自己的更新）
+            const timeSinceLastSave = updatedAtTimestamp - lastSaveTimeRef.current;
+            if (timeSinceLastSave >= 2000) {
+              // 检测到云端有更新（至少2秒前的更新，不是自己的）
+              setCloudUpdateNote(updatedNote);
+              setCloudUpdateDialogOpen(true);
+            }
           }
         }
       )
@@ -673,7 +712,9 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     setIsPinned(cloudUpdateNote.is_pinned || false);
     setIsPublished(cloudUpdateNote.is_published || false);
     setCurrentNote(cloudUpdateNote);
-    lastSavedTimestampRef.current = cloudUpdateNote.updated_at || new Date().toISOString();
+    const cloudUpdatedAt = cloudUpdateNote.updated_at || new Date().toISOString();
+    lastSavedTimestampRef.current = cloudUpdatedAt;
+    lastSaveTimeRef.current = new Date(cloudUpdatedAt).getTime();
     setSaveStatus('saved');
     setCloudUpdateDialogOpen(false);
     setCloudUpdateNote(null);
@@ -683,10 +724,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const handleKeepLocalChanges = async () => {
     if (!currentNote) return;
     
-    // 使用当前本地内容覆盖云端
-    await saveNote(title, content, isPinned, isPublished, tags);
+    // 关闭对话框
     setCloudUpdateDialogOpen(false);
     setCloudUpdateNote(null);
+    
+    // 使用当前本地内容覆盖云端
+    await saveNote(title, content, isPinned, isPublished, tags);
   };
 
   // 点击外部关闭更多菜单
