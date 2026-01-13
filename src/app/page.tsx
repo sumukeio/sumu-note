@@ -27,7 +27,16 @@ export default function LandingPage() {
       try {
         const {
           data: { user },
+          error,
         } = await supabase.auth.getUser();
+
+        // 处理 refresh token 错误
+        if (error) {
+          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
+            await supabase.auth.signOut();
+            return;
+          }
+        }
 
         if (!cancelled && user) {
           router.replace("/dashboard");

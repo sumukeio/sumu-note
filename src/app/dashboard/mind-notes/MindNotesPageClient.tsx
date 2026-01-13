@@ -16,15 +16,32 @@ export default function MindNotesPageClient() {
 
   useEffect(() => {
     const checkUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+
+        // 处理 refresh token 错误
+        if (error) {
+          console.error("Auth error:", error);
+          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
+            await supabase.auth.signOut();
+            router.replace("/");
+            return;
+          }
+        }
+
+        if (!user) {
+          router.replace("/");
+          return;
+        }
+        setUser(user);
+        setLoading(false);
+      } catch (err) {
+        console.error("Failed to check user:", err);
         router.replace("/");
-        return;
       }
-      setUser(user);
-      setLoading(false);
     };
     checkUser();
   }, [router]);
@@ -68,6 +85,8 @@ export default function MindNotesPageClient() {
     />
   );
 }
+
+
 
 
 

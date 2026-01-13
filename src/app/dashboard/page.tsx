@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -11,6 +11,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogOut, Loader2, Download, Search } from "lucide-react";
 import { exportUserNotesToZip } from "@/lib/export-utils";
+
+// 高亮关键词的工具函数
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!text || !query.trim()) return text;
+  
+  const regex = new RegExp(`(${query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  
+  return parts.map((part, index) => 
+    regex.test(part) ? (
+      <mark key={index} className="bg-yellow-200 dark:bg-yellow-900 px-0.5 rounded">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
+
+// 获取内容摘要，包含关键词上下文
+function getContentSnippet(content: string, query: string, maxLength: number = 120): string {
+  if (!content) return "";
+  if (!query.trim()) return content.slice(0, maxLength);
+  
+  const lowerContent = content.toLowerCase();
+  const lowerQuery = query.trim().toLowerCase();
+  const index = lowerContent.indexOf(lowerQuery);
+  
+  if (index === -1) {
+    return content.slice(0, maxLength);
+  }
+  
+  const start = Math.max(0, index - 40);
+  const end = Math.min(content.length, index + query.length + 80);
+  return content.slice(start, end);
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -24,13 +60,37 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  
+  // 防抖和请求取消相关
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace("/"); return; }
-      setUser(user);
-      setLoading(false);
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        // 处理 refresh token 错误
+        if (error) {
+          console.error("Auth error:", error);
+          // 如果是 refresh token 错误，清除 session 并重定向
+          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
+            await supabase.auth.signOut();
+            router.replace("/");
+            return;
+          }
+        }
+        
+        if (!user) { 
+          router.replace("/"); 
+          return; 
+        }
+        setUser(user);
+        setLoading(false);
+      } catch (err) {
+        console.error("Failed to check user:", err);
+        router.replace("/");
+      }
     };
     checkUser();
   }, [router]);
@@ -40,33 +100,90 @@ export default function DashboardPage() {
     router.replace("/");
   };
 
-  const handleGlobalSearchChange = async (
+  const performSearch = useCallback(async (query: string) => {
+    if (!query.trim() || !user?.id) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    // 取消之前的请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // 创建新的 AbortController
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    setSearching(true);
+    const q = `%${query.trim()}%`;
+    
+    try {
+      const { data, error } = await supabase
+        .from("notes")
+        .select("id, title, content, folder_id, updated_at, tags")
+        .eq("user_id", user.id)
+        .or(`title.ilike.${q},content.ilike.${q},tags.ilike.${q}`);
+
+      // 检查是否被取消
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      if (error) {
+        console.error(error);
+        setSearchResults([]);
+      } else {
+        setSearchResults(data || []);
+      }
+    } catch (err: any) {
+      // 忽略取消请求的错误
+      if (err.name !== 'AbortError') {
+        console.error(err);
+        setSearchResults([]);
+      }
+    } finally {
+      if (!abortController.signal.aborted) {
+        setSearching(false);
+      }
+    }
+  }, [user?.id]);
+
+  const handleGlobalSearchChange = useCallback((
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     const value = e.target.value;
     setSearchQuery(value);
+    
+    // 清除之前的防抖定时器
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
     if (!value.trim() || !user?.id) {
       setSearchResults([]);
       setSearching(false);
       return;
     }
 
-    setSearching(true);
-    const q = `%${value.trim()}%`;
-    const { data, error } = await supabase
-      .from("notes")
-      .select("id, title, content, folder_id, updated_at, tags")
-      .eq("user_id", user.id)
-      .or(`title.ilike.${q},content.ilike.${q},tags.ilike.${q}`);
+    // 设置防抖：300ms 后执行搜索
+    debounceTimerRef.current = setTimeout(() => {
+      performSearch(value);
+    }, 300);
+  }, [user?.id, performSearch]);
 
-    if (error) {
-      console.error(error);
-      setSearchResults([]);
-    } else {
-      setSearchResults(data || []);
-    }
-    setSearching(false);
-  };
+  // 清理函数
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleExport = async () => {
     if (!user?.id || exporting) return;
@@ -191,13 +308,16 @@ export default function DashboardPage() {
                   <li
                     key={note.id}
                     className="rounded-lg border border-border bg-card/60 px-3 py-2 cursor-pointer hover:bg-accent/60 transition-colors"
-                    onClick={() =>
-                      router.push(`/notes/${encodeURIComponent(note.id)}`)
-                    }
+                    onClick={() => {
+                      const searchParam = searchQuery.trim() 
+                        ? `?search=${encodeURIComponent(searchQuery.trim())}` 
+                        : '';
+                      router.push(`/notes/${encodeURIComponent(note.id)}${searchParam}`);
+                    }}
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="font-medium truncate">
-                        {note.title || "未命名笔记"}
+                        {highlightText(note.title || "未命名笔记", searchQuery)}
                       </span>
                       <span className="text-[10px] text-muted-foreground whitespace-nowrap">
                         {note.updated_at
@@ -207,7 +327,7 @@ export default function DashboardPage() {
                     </div>
                     {note.content && (
                       <p className="text-xs text-muted-foreground line-clamp-2">
-                        {note.content}
+                        {highlightText(getContentSnippet(note.content, searchQuery), searchQuery)}
                       </p>
                     )}
                   </li>

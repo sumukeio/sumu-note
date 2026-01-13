@@ -21,6 +21,10 @@ function AuthCallbackContent() {
           
           if (error) {
             console.error("Auth callback error:", error);
+            // 处理 refresh token 错误
+            if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
+              await supabase.auth.signOut();
+            }
             router.push("/?error=auth_failed");
             return;
           }
@@ -36,6 +40,10 @@ function AuthCallbackContent() {
 
         if (error) {
           console.error("Auth session error:", error);
+          // 处理 refresh token 错误
+          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
+            await supabase.auth.signOut();
+          }
           router.push("/?error=auth_failed");
           return;
         }

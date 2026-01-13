@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useEffect, useState, useRef } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Button } from "@/components/ui/button";
@@ -24,13 +24,17 @@ interface BacklinkItem {
 export default function NoteDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const [note, setNote] = useState<Note | null>(null);
   const [backlinks, setBacklinks] = useState<BacklinkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingBacklinks, setLoadingBacklinks] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef(false);
 
   const noteIdOrTitle = decodeURIComponent(params.id);
+  const searchQuery = searchParams.get('search') || '';
 
   useEffect(() => {
     const run = async () => {
@@ -119,6 +123,94 @@ export default function NoteDetailPage() {
     run();
   }, [noteIdOrTitle]);
 
+  // 滚动到关键词位置的函数
+  useEffect(() => {
+    if (!searchQuery.trim() || !note?.content || hasScrolledRef.current || !contentRef.current) {
+      return;
+    }
+
+    // 等待 ReactMarkdown 渲染完成
+    const timer = setTimeout(() => {
+      const query = searchQuery.trim();
+      const lowerQuery = query.toLowerCase();
+      
+      // 查找所有文本节点
+      const walker = document.createTreeWalker(
+        contentRef.current!,
+        NodeFilter.SHOW_TEXT,
+        null
+      );
+      
+      let node: Node | null;
+      let targetNode: Node | null = null;
+      let targetOffset = 0;
+      
+      while (node = walker.nextNode()) {
+        const nodeText = node.textContent || '';
+        const nodeLowerText = nodeText.toLowerCase();
+        const nodeIndex = nodeLowerText.indexOf(lowerQuery);
+        
+        if (nodeIndex !== -1) {
+          targetNode = node;
+          targetOffset = nodeIndex;
+          break;
+        }
+      }
+      
+      if (targetNode && targetNode.parentElement) {
+        try {
+          // 创建范围并选中关键词
+          const range = document.createRange();
+          range.setStart(targetNode, targetOffset);
+          range.setEnd(targetNode, targetOffset + query.length);
+          
+          // 高亮关键词
+          const highlight = document.createElement('mark');
+          highlight.className = 'bg-yellow-200 dark:bg-yellow-900 px-0.5 rounded';
+          highlight.style.scrollMarginTop = '100px'; // 为固定头部留出空间
+          
+          try {
+            range.surroundContents(highlight);
+          } catch (e) {
+            // 如果无法包围（跨节点），则只选中并滚动
+            window.getSelection()?.removeAllRanges();
+            window.getSelection()?.addRange(range);
+            targetNode.parentElement.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center',
+              inline: 'nearest'
+            });
+            hasScrolledRef.current = true;
+            return;
+          }
+          
+          // 滚动到高亮位置
+          highlight.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'center',
+            inline: 'nearest'
+          });
+          
+          hasScrolledRef.current = true;
+          
+          // 3秒后移除高亮
+          setTimeout(() => {
+            if (highlight.parentNode) {
+              const parent = highlight.parentNode;
+              const textNode = document.createTextNode(highlight.textContent || '');
+              parent.replaceChild(textNode, highlight);
+              parent.normalize();
+            }
+          }, 3000);
+        } catch (err) {
+          console.warn('Failed to highlight keyword:', err);
+        }
+      }
+    }, 500); // 给 ReactMarkdown 足够的时间渲染
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, note?.content]);
+
   const handleBack = () => {
     router.back();
   };
@@ -185,7 +277,10 @@ export default function NoteDetailPage() {
             {note.title || "未命名笔记"}
           </h1>
 
-          <section className="prose prose-sm sm:prose-base dark:prose-invert max-w-none">
+          <section 
+            ref={contentRef}
+            className="prose prose-sm sm:prose-base dark:prose-invert max-w-none"
+          >
             <MarkdownRenderer content={note.content || ""} />
           </section>
 
