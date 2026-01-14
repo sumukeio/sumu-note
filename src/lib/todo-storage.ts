@@ -71,6 +71,7 @@ export interface UpdateTodoData {
   tags?: string[];
   repeat_rule?: RepeatRule | null;
   order_index?: number;
+  completed_at?: string | null;
 }
 
 export interface TodoQueryOptions {

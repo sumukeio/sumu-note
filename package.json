@@ -8,9 +8,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "type-check": "tsc --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "test:full": "npm run type-check && npm test",
+    "prebuild": "npm run type-check"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

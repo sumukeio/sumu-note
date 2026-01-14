@@ -636,7 +636,7 @@ export default function TodoList({
                             isCompleting={completingIds.has(todo.id)}
                             onToggleComplete={() => handleToggleComplete(todo)}
                             userId={userId}
-                            onUpdate={onRefresh}
+                            onUpdate={onRefresh ?? (() => {})}
                             isSelectMode={isSelectMode}
                             isSelected={selectedIds.has(todo.id)}
                             onToggleSelect={() => handleToggleSelect(todo.id)}
@@ -662,7 +662,7 @@ export default function TodoList({
                       isCompleting={completingIds.has(todo.id)}
                       onToggleComplete={() => handleToggleComplete(todo)}
                       userId={userId}
-                      onUpdate={onRefresh}
+                      onUpdate={onRefresh ?? (() => {})}
                       isSelectMode={isSelectMode}
                       isSelected={selectedIds.has(todo.id)}
                       onToggleSelect={() => handleToggleSelect(todo.id)}

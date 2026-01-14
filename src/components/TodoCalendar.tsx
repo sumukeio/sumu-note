@@ -39,6 +39,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import TodoItem from "./TodoItem";
 import QuickAddTodo from "./QuickAddTodo";
 import TodoContextMenu from "./TodoContextMenu";
+import TodoDetail from "./TodoDetail";
 
 // 可拖拽的任务项
 function DraggableTodoItem({

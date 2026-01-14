@@ -97,7 +97,7 @@ export default function TodoDetail({
     todo.repeat_rule?.end_date ? new Date(todo.repeat_rule.end_date).toISOString().split("T")[0] : ""
   );
   const [repeatEndAfterCount, setRepeatEndAfterCount] = useState<number | undefined>(
-    todo.repeat_rule?.end_after_count
+    todo.repeat_rule?.end_after_count ?? undefined
   );
 
   // 加载用户设置
@@ -178,7 +178,7 @@ export default function TodoDetail({
 
       await updateTodo(todo.id, {
         title,
-        description: description || null,
+        description: description || undefined,
         priority,
         status,
         due_date: dueDateValue,

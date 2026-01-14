@@ -189,7 +189,7 @@ export default function TodoQuadrant({
     });
 
     // 计算更新
-    let updates: { priority?: number; due_date?: string } = {};
+    let updates: { priority?: 0 | 1 | 2 | 3; due_date?: string | null } = {};
     let newPriority: 0 | 1 | 2 | 3 = todo.priority;
     let newDueDate: string | null = todo.due_date;
 
