@@ -801,7 +801,7 @@ export default function TodoCalendar({
                 const dayTodos = getTodosForDate(day);
                 const isCurrentMonth = isSameMonth(day, currentDate);
                 const isTodayDate = isToday(day);
-                const isSelected = selectedDate && isSameDay(day, selectedDate);
+                const isSelected = !!selectedDate && isSameDay(day, selectedDate);
                 const dateKey = format(day, "yyyy-MM-dd");
 
                 return (
@@ -862,7 +862,7 @@ export default function TodoCalendar({
               {calendarDays.slice(0, 7).map((day, index) => {
                 const dayTodos = getTodosForDate(day);
                 const isTodayDate = isToday(day);
-                const isSelected = selectedDate && isSameDay(day, selectedDate);
+                const isSelected = !!selectedDate && isSameDay(day, selectedDate);
                 const dateKey = format(day, "yyyy-MM-dd");
 
                 return (
