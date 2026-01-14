@@ -217,3 +217,12 @@ export default function MindNode({
 
 
 
+
+
+
+
+
+
+
+
+

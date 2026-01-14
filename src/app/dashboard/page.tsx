@@ -85,8 +85,8 @@ export default function DashboardPage() {
           router.replace("/"); 
           return; 
         }
-        setUser(user);
-        setLoading(false);
+      setUser(user);
+      setLoading(false);
       } catch (err) {
         console.error("Failed to check user:", err);
         router.replace("/");
@@ -120,23 +120,23 @@ export default function DashboardPage() {
     const q = `%${query.trim()}%`;
     
     try {
-      const { data, error } = await supabase
-        .from("notes")
-        .select("id, title, content, folder_id, updated_at, tags")
-        .eq("user_id", user.id)
-        .or(`title.ilike.${q},content.ilike.${q},tags.ilike.${q}`);
+    const { data, error } = await supabase
+      .from("notes")
+      .select("id, title, content, folder_id, updated_at, tags")
+      .eq("user_id", user.id)
+      .or(`title.ilike.${q},content.ilike.${q},tags.ilike.${q}`);
 
       // 检查是否被取消
       if (abortController.signal.aborted) {
         return;
       }
 
-      if (error) {
-        console.error(error);
-        setSearchResults([]);
-      } else {
-        setSearchResults(data || []);
-      }
+    if (error) {
+      console.error(error);
+      setSearchResults([]);
+    } else {
+      setSearchResults(data || []);
+    }
     } catch (err: any) {
       // 忽略取消请求的错误
       if (err.name !== 'AbortError') {
@@ -163,7 +163,7 @@ export default function DashboardPage() {
 
     if (!value.trim() || !user?.id) {
       setSearchResults([]);
-      setSearching(false);
+    setSearching(false);
       return;
     }
 
@@ -182,7 +182,7 @@ export default function DashboardPage() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-    };
+  };
   }, []);
 
   const handleExport = async () => {
@@ -227,52 +227,84 @@ export default function DashboardPage() {
               />
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* 桌面端：文字按钮 */}
-            <Link href="/dashboard/mind-notes" className="hidden sm:inline-flex">
-              <Button variant="ghost" size="sm">
-                思维笔记
+          <div className="flex items-center gap-1">
+            {/* 导航链接组 - 使用更紧凑的样式 */}
+            <div className="flex items-center gap-0.5 border-r border-border/50 pr-2 mr-2">
+              <Link href="/dashboard/mind-notes" className="hidden sm:inline-flex">
+                <Button variant="ghost" size="sm" className="h-8 px-3 text-sm">
+                  思维笔记
+                </Button>
+              </Link>
+              <Link href="/dashboard/todos" className="hidden sm:inline-flex">
+                <Button variant="ghost" size="sm" className="h-8 px-3 text-sm">
+                  任务管理
+                </Button>
+              </Link>
+              <Link href="/dashboard/stats" className="hidden sm:inline-flex">
+                <Button variant="ghost" size="sm" className="h-8 px-3 text-sm">
+                  统计
+                </Button>
+              </Link>
+              {/* 手机端：图标按钮 */}
+              <Link href="/dashboard/mind-notes" className="sm:hidden">
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="思维笔记">
+                  🧠
+                </Button>
+              </Link>
+              <Link href="/dashboard/todos" className="sm:hidden">
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="任务管理">
+                  ✅
+                </Button>
+              </Link>
+              <Link href="/dashboard/stats" className="sm:hidden">
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="统计">
+                  📊
+                </Button>
+              </Link>
+            </div>
+            
+            {/* 操作按钮组 */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleExport}
+                disabled={exporting}
+                className="h-8 px-2 text-sm hidden sm:flex items-center gap-1.5"
+                title="导出备份"
+              >
+                {exporting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span className="hidden lg:inline">导出中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hidden lg:inline">导出</span>
+                  </>
+                )}
               </Button>
-            </Link>
-            <Link href="/dashboard/stats" className="hidden sm:inline-flex">
-              <Button variant="ghost" size="sm">
-                统计
-              </Button>
-            </Link>
-            {/* 手机端：图标按钮，保持导航简洁 */}
-            <Link href="/dashboard/mind-notes" className="sm:hidden">
-              <Button variant="ghost" size="icon" aria-label="思维笔记">
-                🧠
-              </Button>
-            </Link>
-            <Link href="/dashboard/stats" className="sm:hidden">
-              <Button variant="ghost" size="icon" aria-label="统计">
-                📊
-              </Button>
-            </Link>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-              disabled={exporting}
-              className="flex items-center gap-2"
-            >
-              {exporting ? (
-                <>
+              {/* 移动端导出按钮 */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleExport}
+                disabled={exporting}
+                className="h-8 w-8 sm:hidden"
+                title="导出备份"
+              >
+                {exporting ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  导出中...
-                </>
-              ) : (
-                <>
+                ) : (
                   <Download className="w-4 h-4" />
-                  导出备份
-                </>
-              )}
-            </Button>
-            <ModeToggle />
-            <Button variant="ghost" size="icon" onClick={handleSignOut}>
-              <LogOut className="w-5 h-5" />
-            </Button>
+                )}
+              </Button>
+              <ModeToggle />
+              <Button variant="ghost" size="icon" onClick={handleSignOut} className="h-8 w-8" title="退出登录">
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </nav>

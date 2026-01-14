@@ -46,10 +46,10 @@ export default function StatsPage() {
   useEffect(() => {
     const run = async () => {
       try {
-        const {
-          data: { user },
+      const {
+        data: { user },
           error,
-        } = await supabase.auth.getUser();
+      } = await supabase.auth.getUser();
 
         // 处理 refresh token 错误
         if (error) {
@@ -61,17 +61,17 @@ export default function StatsPage() {
           }
         }
 
-        if (!user) {
-          router.replace("/");
-          return;
-        }
-        setUserId(user.id);
-        try {
-          const result = await getDashboardStats(user.id);
-          setStats(result);
-        } catch (err: any) {
-          console.error(err);
-          setError(err?.message || "加载统计数据失败");
+      if (!user) {
+        router.replace("/");
+        return;
+      }
+      setUserId(user.id);
+      try {
+        const result = await getDashboardStats(user.id);
+        setStats(result);
+      } catch (err: any) {
+        console.error(err);
+        setError(err?.message || "加载统计数据失败");
         }
       } catch (err) {
         console.error("Failed to check user:", err);
