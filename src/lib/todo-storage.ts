@@ -227,7 +227,9 @@ export async function getTodos(
     query = query.gte("due_date", due_date_from);
   }
   if (due_date_to) {
-    query = query.lte("due_date", due_date_to);
+    // 使用 lt 而不是 lte，确保不包含 due_date_to 当天的任务
+    // 例如，如果 due_date_to 是明天的 00:00:00，我们只想包含今天 23:59:59 之前的任务
+    query = query.lt("due_date", due_date_to);
   }
 
   // 父任务过滤
@@ -566,6 +568,22 @@ export async function createTodoList(
   userId: string,
   data: CreateTodoListData
 ): Promise<TodoList> {
+  // 检查清单名字是否重复
+  const trimmedName = data.name.trim();
+  if (!trimmedName) {
+    throw new Error("清单名称不能为空");
+  }
+
+  const { data: existingLists } = await supabase
+    .from("todo_lists")
+    .select("name")
+    .eq("user_id", userId)
+    .ilike("name", trimmedName);
+
+  if (existingLists && existingLists.length > 0) {
+    throw new Error(`清单名称"${trimmedName}"已存在，请使用其他名称`);
+  }
+
   // 如果没有指定 order_index，自动计算
   let orderIndex = data.order_index;
   if (orderIndex === undefined) {
@@ -592,7 +610,7 @@ export async function createTodoList(
     .from("todo_lists")
     .insert({
       user_id: userId,
-      name: data.name,
+      name: trimmedName,
       color: data.color || null,
       icon: data.icon || null,
       is_default: data.is_default || false,
@@ -633,27 +651,73 @@ export async function getTodoLists(userId: string): Promise<TodoList[]> {
 export async function getDefaultTodoList(
   userId: string
 ): Promise<TodoList | null> {
-  const { data, error } = await supabase
-    .from("todo_lists")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("is_default", true)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from("todo_lists")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("is_default", true)
+      .maybeSingle();
 
-  if (error) {
-    console.error("Failed to fetch default todo list:", error);
+    // 如果查询成功且有数据，返回默认清单
+    if (!error && data) {
+      return data as TodoList;
+    }
+
+    // 如果有错误，记录但不阻止后续操作
+    if (error) {
+      // 检查是否是真正的错误（不是简单的"未找到记录"）
+      // maybeSingle() 在没有记录时不应该返回错误，所以如果有错误，可能是表不存在或权限问题
+      const errorCode = error.code || "";
+      const errorMessage = error.message || "";
+      const hasErrorInfo = errorCode || errorMessage || Object.keys(error).length > 0;
+      
+      // 只记录有实际内容的错误
+      if (hasErrorInfo) {
+        console.warn("Failed to fetch default todo list:", {
+          code: errorCode || "unknown",
+          message: errorMessage || "No error message",
+          fullError: error,
+        });
+      } else {
+        // 如果错误对象是空的，可能是正常的"未找到记录"情况，静默处理
+        console.debug("No default todo list found (this is normal if none exists)");
+      }
+      
+      // 尝试获取任何清单作为后备
+      try {
+        const { data: anyList } = await supabase
+          .from("todo_lists")
+          .select("*")
+          .eq("user_id", userId)
+          .limit(1)
+          .maybeSingle();
+        
+        if (anyList) {
+          return anyList as TodoList;
+        }
+      } catch (fallbackError) {
+        // 如果后备查询也失败，继续尝试创建
+        console.warn("Fallback query failed:", fallbackError);
+      }
+    }
+
+    // 如果没有默认清单，尝试创建一个
+    try {
+      return await createTodoList(userId, {
+        name: "默认清单",
+        is_default: true,
+      });
+    } catch (createError) {
+      console.error("Failed to create default todo list:", createError);
+      // 即使创建失败，也返回 null，让调用者处理
+      return null;
+    }
+  } catch (error) {
+    // 捕获所有未预期的错误
+    console.error("Unexpected error in getDefaultTodoList:", error);
     return null;
   }
-
-  if (data) {
-    return data as TodoList;
-  }
-
-  // 如果没有默认清单，创建一个
-  return await createTodoList(userId, {
-    name: "默认清单",
-    is_default: true,
-  });
 }
 
 /**
@@ -681,6 +745,40 @@ export async function updateTodoList(
   id: string,
   data: UpdateTodoListData
 ): Promise<TodoList> {
+  // 如果更新了名字，检查是否重复
+  if (data.name !== undefined) {
+    const trimmedName = data.name.trim();
+    if (!trimmedName) {
+      throw new Error("清单名称不能为空");
+    }
+
+    // 获取当前清单的用户ID
+    const { data: currentList } = await supabase
+      .from("todo_lists")
+      .select("user_id, name")
+      .eq("id", id)
+      .single();
+
+    if (currentList) {
+      // 如果名字没有改变，不需要检查重复
+      if (currentList.name === trimmedName) {
+        // 名字没变，继续更新其他字段
+      } else {
+        // 检查新名字是否与其他清单重复
+        const { data: existingLists } = await supabase
+          .from("todo_lists")
+          .select("name")
+          .eq("user_id", currentList.user_id)
+          .neq("id", id)
+          .ilike("name", trimmedName);
+
+        if (existingLists && existingLists.length > 0) {
+          throw new Error(`清单名称"${trimmedName}"已存在，请使用其他名称`);
+        }
+      }
+    }
+  }
+
   // 如果设置为默认清单，先取消其他默认清单
   if (data.is_default) {
     const { data: list } = await supabase
@@ -699,9 +797,15 @@ export async function updateTodoList(
     }
   }
 
+  // 如果更新了名字，使用修剪后的名字
+  const updateData = { ...data };
+  if (updateData.name !== undefined) {
+    updateData.name = updateData.name.trim();
+  }
+
   const { data: updatedList, error } = await supabase
     .from("todo_lists")
-    .update(data)
+    .update(updateData)
     .eq("id", id)
     .select()
     .single();

@@ -4,14 +4,14 @@ import { useState, useEffect, KeyboardEvent } from "react";
 import { Plus, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { createTodo } from "@/lib/todo-storage";
+import { createTodo, type Todo } from "@/lib/todo-storage";
 import { parseTaskInput } from "@/lib/todo-utils";
 import { getUserSettings } from "@/lib/user-settings";
 
 interface QuickAddTodoProps {
   userId: string;
   listId: string | null | "today" | "done";
-  onTaskCreated?: () => void;
+  onTaskCreated?: (todo: Todo) => void;
   onSwitchToToday?: () => void;
 }
 
@@ -53,7 +53,7 @@ export default function QuickAddTodo({
       const actualListId = listId === "today" || listId === "done" ? null : listId;
 
       // 创建任务
-      await createTodo(userId, {
+      const newTodo = await createTodo(userId, {
         title: parsed.title,
         list_id: actualListId,
         due_date: parsed.due_date || null,
@@ -67,7 +67,8 @@ export default function QuickAddTodo({
         onSwitchToToday();
       }
 
-      onTaskCreated?.();
+      // 传递新创建的任务给回调
+      onTaskCreated?.(newTodo);
     } catch (error) {
       console.error("Failed to create todo:", error);
       // 恢复输入以便重试

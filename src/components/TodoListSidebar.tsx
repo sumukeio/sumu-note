@@ -55,6 +55,9 @@ export default function TodoListSidebar({
       setIsCreating(false);
     } catch (error) {
       console.error("Failed to create list:", error);
+      // 显示错误提示
+      const errorMessage = error instanceof Error ? error.message : "创建清单失败";
+      alert(errorMessage);
     }
   };
 
@@ -78,6 +81,9 @@ export default function TodoListSidebar({
       setEditingId(null);
     } catch (error) {
       console.error("Failed to update list:", error);
+      // 显示错误提示
+      const errorMessage = error instanceof Error ? error.message : "更新清单失败";
+      alert(errorMessage);
     } finally {
       setLoading(null);
     }

@@ -218,16 +218,43 @@ export default function TodoList({
   const handleToggleComplete = async (todo: Todo) => {
     setCompletingIds((prev) => new Set(prev).add(todo.id));
 
+    // 乐观更新：先更新本地状态
+    const newStatus = todo.status === "done" ? "todo" : "done";
+    const newCompletedAt = newStatus === "done" ? new Date().toISOString() : null;
+    
+    setLocalTodos((prev) =>
+      prev.map((t) =>
+        t.id === todo.id
+          ? {
+              ...t,
+              status: newStatus,
+              completed_at: newCompletedAt,
+            }
+          : t
+      )
+    );
+
     try {
       if (todo.status === "done") {
         await uncompleteTodo(todo.id);
       } else {
         await completeTodo(todo.id);
       }
-      // 刷新列表
-      onRefresh?.();
+      // 不调用 onRefresh，保持流畅的用户体验
     } catch (error) {
       console.error("Failed to toggle todo:", error);
+      // 回滚到原始状态
+      setLocalTodos((prev) =>
+        prev.map((t) =>
+          t.id === todo.id
+            ? {
+                ...t,
+                status: todo.status,
+                completed_at: todo.completed_at,
+              }
+            : t
+        )
+      );
     } finally {
       setCompletingIds((prev) => {
         const next = new Set(prev);

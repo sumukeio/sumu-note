@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getTodoLists, type TodoList } from "@/lib/todo-storage";
+import { getTodoLists, type TodoList, type Todo } from "@/lib/todo-storage";
 import TodoListSidebar from "./TodoListSidebar";
 import TodoListView from "./TodoListView";
 import TodoStats from "./TodoStats";
@@ -60,6 +60,7 @@ export default function TodoManager({ userId }: TodoManagerProps) {
     dueDateFrom: null,
     dueDateTo: null,
   });
+  const [newTodo, setNewTodo] = useState<Todo | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 加载清单列表
@@ -398,15 +399,18 @@ export default function TodoManager({ userId }: TodoManagerProps) {
                 dueDateTo={advancedFilters.dueDateTo}
                 sortBy={sortBy}
                 sortOrder={sortOrder}
+                newTodo={newTodo}
               />
 
               {/* 快速添加任务 */}
               <QuickAddTodo
                 userId={userId}
                 listId={selectedListId}
-                onTaskCreated={() => {
-                  // 任务创建后刷新列表
-                  setRefreshKey((prev) => prev + 1);
+                onTaskCreated={(todo) => {
+                  // 传递新创建的任务给 TodoListView，它会自动判断是否应该显示
+                  setNewTodo(todo);
+                  // 清除 newTodo 状态，避免重复添加
+                  setTimeout(() => setNewTodo(null), 100);
                 }}
                 onSwitchToToday={() => {
                   // 自动切换到"今天"清单
