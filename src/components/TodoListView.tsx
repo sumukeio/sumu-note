@@ -52,7 +52,7 @@ export default function TodoListView({
     setLoading(true);
     try {
       // 处理特殊筛选：今天、已完成
-      let actualListId: string | null = null;
+      let actualListId: string | null | undefined = null;
       let actualStatusFilter: "all" | "todo" | "in_progress" | "done" = statusFilter;
       let dueDateFrom: string | null = null;
       let dueDateTo: string | null = null;
@@ -79,7 +79,7 @@ export default function TodoListView({
 
       // 高级筛选优先级：如果设置了高级筛选，使用高级筛选的值
       // 但是，如果当前是"今天"或"已完成"视图，优先使用视图的筛选条件
-      let finalListId = listIdFilter !== undefined ? listIdFilter : actualListId;
+      const baseFinalListId = listIdFilter !== undefined ? listIdFilter : actualListId;
       let finalStatus = actualStatusFilter;
       let finalDueDateFrom = propDueDateFrom !== undefined ? propDueDateFrom : dueDateFrom;
       let finalDueDateTo = propDueDateTo !== undefined ? propDueDateTo : dueDateTo;
@@ -97,8 +97,11 @@ export default function TodoListView({
         finalStatus = "done";
       }
 
-      const result = await getTodos(userId, {
-        list_id: finalListId,
+      // finalListId 在构建查询选项时使用
+      const finalListId = baseFinalListId;
+
+      // 构建查询选项，如果是"全部任务"视图（finalListId === undefined），不传递 list_id
+      const queryOptions: Parameters<typeof getTodos>[1] = {
         status: finalStatus,
         priority: priorityFilter !== undefined ? priorityFilter : "all",
         tags: tagsFilter || [],
@@ -108,7 +111,14 @@ export default function TodoListView({
         sort_order: sortOrder,
         due_date_from: finalDueDateFrom,
         due_date_to: finalDueDateTo,
-      });
+      };
+
+      // 只有在 finalListId 不是 undefined 时才添加 list_id
+      if (finalListId !== undefined) {
+        queryOptions.list_id = finalListId;
+      }
+
+      const result = await getTodos(userId, queryOptions);
       setTodos(result.todos);
     } catch (error) {
       console.error("Failed to load todos:", error);
