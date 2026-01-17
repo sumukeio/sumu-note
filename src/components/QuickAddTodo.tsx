@@ -10,7 +10,7 @@ import { getUserSettings } from "@/lib/user-settings";
 
 interface QuickAddTodoProps {
   userId: string;
-  listId: string | null;
+  listId: string | null | "today" | "done";
   onTaskCreated?: () => void;
   onSwitchToToday?: () => void;
 }
@@ -49,10 +49,13 @@ export default function QuickAddTodo({
       // 解析输入，提取日期/时间/标签/优先级
       const parsed = parseTaskInput(trimmedInput, reminderBeforeMinutes);
 
+      // 处理虚拟列表（"today" 和 "done" 不是真实的 UUID，需要转换为 null 使用默认清单）
+      const actualListId = listId === "today" || listId === "done" ? null : listId;
+
       // 创建任务
       await createTodo(userId, {
         title: parsed.title,
-        list_id: listId,
+        list_id: actualListId,
         due_date: parsed.due_date || null,
         reminder_time: parsed.reminder_time || null,
         tags: parsed.tags,

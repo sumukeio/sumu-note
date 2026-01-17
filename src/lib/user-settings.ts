@@ -27,7 +27,14 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
     if (error) {
       // PGRST116 表示没有找到记录，这是正常的（用户还没有设置）
       // 42P01 表示表不存在，这也是正常的（表可能还没创建）
-      if (error.code !== "PGRST116" && error.code !== "42P01") {
+      // 检查错误消息中是否包含表不存在的提示
+      const isTableNotFound = 
+        error.code === "PGRST116" || 
+        error.code === "42P01" ||
+        error.message?.includes("Could not find the table") ||
+        error.message?.includes("relation") && error.message?.includes("does not exist");
+      
+      if (!isTableNotFound) {
         // 只在非预期的错误时记录日志
         console.warn("Failed to get user settings:", error.message || error);
       }
