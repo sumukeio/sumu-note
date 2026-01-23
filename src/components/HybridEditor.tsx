@@ -70,23 +70,19 @@ export default function HybridEditor({
     }
   }, [tableInfo, content]);
 
-  // 处理表格更新
+  // 处理表格更新（InlineTableEditor 已返回完整内容）
   const handleTableUpdate = useCallback(
-    (newContent: string, newCursorPosition: number) => {
-      // 合并表格前后的内容
-      const fullContent = beforeTable + newContent + afterTable;
-      onChange(fullContent);
-      
-      // 更新光标位置
+    (newContent: string) => {
+      onChange(newContent);
+      // 尝试在更新后同步一次光标位置
       setTimeout(() => {
         if (textareaRef.current) {
-          const adjustedPosition = beforeTable.length + newCursorPosition;
-          textareaRef.current.setSelectionRange(adjustedPosition, adjustedPosition);
-          onCursorChange(adjustedPosition);
+          const pos = textareaRef.current.selectionStart || 0;
+          onCursorChange(pos);
         }
       }, 0);
     },
-    [beforeTable, afterTable, onChange, onCursorChange]
+    [onChange, onCursorChange]
   );
 
   // 处理文本区域的变化

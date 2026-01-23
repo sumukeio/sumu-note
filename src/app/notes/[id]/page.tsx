@@ -155,7 +155,7 @@ export default function NoteDetailPage() {
 
       const query = searchQuery.trim();
       // 使用 search-utils 查找所有匹配项（基于纯文本）
-      const textMatches = findAllMatches(note.content, query, false);
+      const textMatches = findAllMatches(note.content ?? "", query, false);
       setMatches(textMatches);
 
       // 清除之前的高亮
