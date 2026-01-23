@@ -36,7 +36,7 @@ interface TodoDetailProps {
   todo: Todo;
   userId: string;
   onClose: () => void;
-  onUpdate: () => void;
+  onUpdate: (updatedTodo?: Todo) => void;
   onDelete: () => void;
 }
 
@@ -114,20 +114,79 @@ export default function TodoDetail({
   }, [userId]);
 
   // 自动设置提醒时间（当截止日期或时间改变时，且用户未手动设置）
+  // 需求1：填写截止日期后，提醒时间自动填写为截止日期的前15分钟
   useEffect(() => {
     if (!isReminderManuallySet) {
       if (dueDate && dueTime) {
-        const dueDateTime = new Date(`${dueDate}T${dueTime}`);
+        const dueDateTime = new Date(`${dueDate}T${dueTime}:00`);
         const reminderDateTime = new Date(dueDateTime);
         reminderDateTime.setMinutes(reminderDateTime.getMinutes() - reminderBeforeMinutes);
-        setReminderTime(reminderDateTime.toISOString().slice(0, 16));
+        // 转换为本地时间格式（YYYY-MM-DDTHH:mm）
+        const year = reminderDateTime.getFullYear();
+        const month = String(reminderDateTime.getMonth() + 1).padStart(2, '0');
+        const day = String(reminderDateTime.getDate()).padStart(2, '0');
+        const hours = String(reminderDateTime.getHours()).padStart(2, '0');
+        const minutes = String(reminderDateTime.getMinutes()).padStart(2, '0');
+        setReminderTime(`${year}-${month}-${day}T${hours}:${minutes}`);
       } else if (dueDate && !dueTime) {
         // 如果只有日期没有时间，设置为当天9点前指定分钟数
         const reminderDateTime = new Date(`${dueDate}T08:${String(60 - reminderBeforeMinutes).padStart(2, '0')}`);
-        setReminderTime(reminderDateTime.toISOString().slice(0, 16));
+        const year = reminderDateTime.getFullYear();
+        const month = String(reminderDateTime.getMonth() + 1).padStart(2, '0');
+        const day = String(reminderDateTime.getDate()).padStart(2, '0');
+        const hours = String(reminderDateTime.getHours()).padStart(2, '0');
+        const minutes = String(reminderDateTime.getMinutes()).padStart(2, '0');
+        setReminderTime(`${year}-${month}-${day}T${hours}:${minutes}`);
       }
     }
   }, [dueDate, dueTime, reminderBeforeMinutes, isReminderManuallySet]);
+
+  // 同步 todo prop 的变化（当任务从外部更新时）
+  useEffect(() => {
+    setTitle(todo.title);
+    setDescription(todo.description || "");
+    setPriority(todo.priority);
+    setStatus(todo.status);
+    
+    // 需求1：如果任务没有截止日期，默认为当前日期时间
+    if (todo.due_date) {
+      setDueDate(new Date(todo.due_date).toISOString().split("T")[0]);
+      setDueTime(new Date(todo.due_date).toTimeString().slice(0, 5));
+    } else {
+      // 无日期的任务，默认设置为当前日期时间
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      setDueDate(`${year}-${month}-${day}`);
+      setDueTime(`${hours}:${minutes}`);
+    }
+    
+    // 处理提醒时间：转换为本地时间格式（YYYY-MM-DDTHH:mm）
+    if (todo.reminder_time) {
+      const reminderDate = new Date(todo.reminder_time);
+      // 获取本地时间的年月日和时分
+      const year = reminderDate.getFullYear();
+      const month = String(reminderDate.getMonth() + 1).padStart(2, '0');
+      const day = String(reminderDate.getDate()).padStart(2, '0');
+      const hours = String(reminderDate.getHours()).padStart(2, '0');
+      const minutes = String(reminderDate.getMinutes()).padStart(2, '0');
+      setReminderTime(`${year}-${month}-${day}T${hours}:${minutes}`);
+    } else {
+      setReminderTime("");
+    }
+    setListId(todo.list_id);
+    setTags(todo.tags || []);
+    setRepeatRule(todo.repeat_rule);
+    setRepeatType(todo.repeat_rule ? todo.repeat_rule.type : "none");
+    setRepeatInterval(todo.repeat_rule?.interval || 1);
+    setRepeatDaysOfWeek(todo.repeat_rule?.days_of_week || []);
+    setRepeatDayOfMonth(todo.repeat_rule?.day_of_month);
+    setRepeatEndDate(todo.repeat_rule?.end_date ? new Date(todo.repeat_rule.end_date).toISOString().split("T")[0] : "");
+    setRepeatEndAfterCount(todo.repeat_rule?.end_after_count ?? undefined);
+  }, [todo.id, todo.title, todo.description, todo.priority, todo.status, todo.due_date, todo.reminder_time, todo.list_id, todo.tags, todo.repeat_rule]);
 
   // 加载清单列表和子任务
   useEffect(() => {
@@ -158,6 +217,44 @@ export default function TodoDetail({
         dueDateValue = new Date(dateTime).toISOString();
       }
 
+      // 处理提醒时间：确保格式正确
+      let reminderTimeValue: string | null = null;
+      if (reminderTime) {
+        // reminderTime 格式是 "YYYY-MM-DDTHH:mm"（datetime-local 输入框的格式）
+        // 需要转换为完整的 ISO 字符串
+        try {
+          // 创建一个 Date 对象，它会将本地时间解释为本地时区
+          const localDate = new Date(reminderTime);
+          // 检查日期是否有效
+          if (isNaN(localDate.getTime())) {
+            console.error("Invalid reminder time format:", reminderTime);
+            reminderTimeValue = null;
+          } else {
+            reminderTimeValue = localDate.toISOString();
+          }
+        } catch (e) {
+          console.error("Invalid reminder time format:", reminderTime, e);
+          reminderTimeValue = null;
+        }
+      }
+
+      // 需求2：智能识别截止日期是否是今天
+      // 如果截止日期是今天，将任务移到"今天"清单（list_id 设为 null，这样会在"今天"视图中显示）
+      let finalListId = listId;
+      if (dueDateValue) {
+        const dueDateObj = new Date(dueDateValue);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dueDateOnly = new Date(dueDateObj);
+        dueDateOnly.setHours(0, 0, 0, 0);
+        
+        // 检查是否是今天
+        if (dueDateOnly.getTime() === today.getTime()) {
+          // 如果是今天，将 list_id 设为 null，这样任务会在"今天"视图中显示
+          finalListId = null;
+        }
+      }
+
       // 构建重复规则
       let repeatRuleValue: RepeatRule | null = null;
       if (repeatType !== "none") {
@@ -176,18 +273,20 @@ export default function TodoDetail({
         }
       }
 
-      await updateTodo(todo.id, {
+      const updatedTodo = await updateTodo(todo.id, {
         title,
         description: description || undefined,
         priority,
         status,
         due_date: dueDateValue,
-        reminder_time: reminderTime || null,
-        list_id: listId,
+        reminder_time: reminderTimeValue,
+        list_id: finalListId,
         tags,
         repeat_rule: repeatRuleValue,
       });
-      onUpdate();
+      
+      // 传递更新后的任务给 onUpdate 回调，以便立即更新 UI
+      onUpdate(updatedTodo);
       onClose();
     } catch (error) {
       console.error("Failed to update todo:", error);
@@ -315,9 +414,38 @@ export default function TodoDetail({
     }
   };
 
+  // 阻止拖拽事件传播，避免在选中文字时触发任务拖动
+  // @dnd-kit 使用 mousedown 和 touchstart 事件来检测拖拽
+  // 在弹窗容器上阻止这些事件传播到父级的 DndContext
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // 阻止事件传播到父级，避免触发任务列表的拖拽
+    e.stopPropagation();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // 阻止事件传播到父级，避免触发任务列表的拖拽
+    e.stopPropagation();
+  };
+
+  const handleDragStart = (e: React.DragEvent) => {
+    // 阻止拖拽事件传播
+    e.stopPropagation();
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-background rounded-lg border border-border w-full max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col">
+    <div 
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4"
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+      onDragStart={handleDragStart}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div 
+        className="bg-background rounded-lg border border-border w-full max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col"
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onDragStart={handleDragStart}
+      >
         {/* 头部 */}
         <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border shrink-0">
           <h2 className="text-base sm:text-lg font-semibold">任务详情</h2>

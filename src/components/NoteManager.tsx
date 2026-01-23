@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { 
   Copy, Trash2, FolderInput, X, Check, Loader2, Plus, 
   FileText, ArrowLeft, CheckCircle2, Pencil, Eye, PenLine, 
-  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical, WifiOff, Wifi, History
+  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical, WifiOff, Wifi, History, Table, Rows, Columns, AlignLeft
 } from "lucide-react"; 
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,12 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { createNoteVersion, getNoteVersions, type NoteVersion } from "@/lib/version-history";
 import { isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes } from "@/lib/offline-storage";
+import NoteStats from "@/components/NoteStats";
+import FindReplaceDialog from "@/components/FindReplaceDialog";
+import TableEditor from "@/components/TableEditor";
+import InlineTableEditor from "@/components/InlineTableEditor";
+import { type Match, findAllMatches } from "@/lib/search-utils";
+import { detectTableAtCursor, addTableRow, addTableColumn, formatTable } from "@/lib/table-utils";
 
 import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -165,6 +171,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuPortalRef = useRef<HTMLDivElement>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+
+  // 查找替换相关状态
+  const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
+  const [findReplaceMode, setFindReplaceMode] = useState<"find" | "replace">("find");
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
+  const [matches, setMatches] = useState<Match[]>([]);
+
+  // 表格编辑器相关状态
+  const [isTableEditorOpen, setIsTableEditorOpen] = useState(false);
 
   // 多选与拖拽
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -407,6 +422,41 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
   }, [currentNote, userId]);
 
+  // 检测光标是否在表格内的状态（用于UI显示）
+  const [isInTable, setIsInTable] = useState(false);
+
+  // 监听光标位置变化，更新表格检测状态
+  useEffect(() => {
+    if (!editorRef.current || view !== 'editor') {
+      setIsInTable(false);
+      return;
+    }
+    
+    const textarea = editorRef.current;
+    const checkTable = () => {
+      if (!textarea) return;
+      const cursorPosition = textarea.selectionStart;
+      const tableInfo = detectTableAtCursor(content, cursorPosition);
+      setIsInTable(tableInfo !== null);
+    };
+    
+    // 使用定时器定期检查（避免频繁检查影响性能）
+    const interval = setInterval(checkTable, 300);
+    checkTable(); // 立即检查一次
+    
+    // 监听事件
+    textarea.addEventListener('keyup', checkTable);
+    textarea.addEventListener('click', checkTable);
+    textarea.addEventListener('input', checkTable);
+    
+    return () => {
+      clearInterval(interval);
+      textarea.removeEventListener('keyup', checkTable);
+      textarea.removeEventListener('click', checkTable);
+      textarea.removeEventListener('input', checkTable);
+    };
+  }, [content, view]);
+
   const handleContentChange = (newTitle: string, newContent: string) => { 
       const now = Date.now();
       const prevTitle = title;
@@ -500,6 +550,89 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
               editorRef.current.setSelectionRange(pos, pos);
           }
       });
+  };
+
+  // 插入表格功能
+  const handleInsertTable = () => {
+    if (!editorRef.current) return;
+    
+    const textarea = editorRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = content;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    
+    // 插入2x2表格的Markdown语法
+    // 光标定位到第一个单元格（第一个空格位置）
+    const tableText = `|  |  |
+|--|--|
+|  |  |
+`;
+    const nextContent = before + tableText + after;
+    setContent(nextContent);
+    handleContentChange(title, nextContent);
+    
+    // 将光标定位到第一个单元格（第一个空格位置）
+    requestAnimationFrame(() => {
+      if (editorRef.current) {
+        const pos = before.length + 2; // 第一个单元格的位置（| 之后）
+        editorRef.current.focus();
+        editorRef.current.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  // 表格编辑辅助功能
+  const handleAddTableRow = () => {
+    if (!editorRef.current) return;
+    
+    const cursorPosition = editorRef.current.selectionStart;
+    const { newContent, newCursorPosition } = addTableRow(content, cursorPosition);
+    
+    setContent(newContent);
+    handleContentChange(title, newContent);
+    
+    requestAnimationFrame(() => {
+      if (editorRef.current) {
+        editorRef.current.focus();
+        editorRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+      }
+    });
+  };
+
+  const handleAddTableColumn = () => {
+    if (!editorRef.current) return;
+    
+    const cursorPosition = editorRef.current.selectionStart;
+    const { newContent, newCursorPosition } = addTableColumn(content, cursorPosition);
+    
+    setContent(newContent);
+    handleContentChange(title, newContent);
+    
+    requestAnimationFrame(() => {
+      if (editorRef.current) {
+        editorRef.current.focus();
+        editorRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+      }
+    });
+  };
+
+  const handleFormatTable = () => {
+    if (!editorRef.current) return;
+    
+    const cursorPosition = editorRef.current.selectionStart;
+    const newContent = formatTable(content, cursorPosition);
+    
+    setContent(newContent);
+    handleContentChange(title, newContent);
+  };
+
+  // 检测光标是否在表格内
+  const isCursorInTable = (): boolean => {
+    if (!editorRef.current) return false;
+    const cursorPosition = editorRef.current.selectionStart;
+    return detectTableAtCursor(content, cursorPosition) !== null;
   };
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -688,6 +821,67 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
     };
   }, [view, currentNote]);
+
+  // 查找替换快捷键监听
+  useEffect(() => {
+    if (view !== "editor") return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F 或 Cmd+F：打开查找
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setFindReplaceMode("find");
+        setIsFindReplaceOpen(true);
+        return;
+      }
+
+      // Ctrl+H 或 Cmd+H：打开替换
+      if ((e.ctrlKey || e.metaKey) && e.key === "h") {
+        e.preventDefault();
+        setFindReplaceMode("replace");
+        setIsFindReplaceOpen(true);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [view]);
+
+  // 处理查找匹配项
+  const handleFind = useCallback((newMatches: Match[], newIndex: number) => {
+    setMatches(newMatches);
+    setCurrentMatchIndex(newIndex);
+    
+    // 定位到匹配项
+    if (newIndex >= 0 && newIndex < newMatches.length && editorRef.current) {
+      const match = newMatches[newIndex];
+      editorRef.current.focus();
+      editorRef.current.setSelectionRange(match.start, match.end);
+      // 滚动到匹配项位置
+      editorRef.current.scrollTop = editorRef.current.scrollHeight;
+    }
+  }, []);
+
+  // 处理替换
+  const handleReplace = useCallback((newText: string, nextMatchIndex: number) => {
+    setContent(newText);
+    setCurrentMatchIndex(nextMatchIndex);
+    
+    // 定位到下一个匹配项（如果有）
+    if (nextMatchIndex >= 0 && editorRef.current) {
+      // 注意：nextMatchIndex 已经是基于新文本计算的，直接使用
+      // FindReplaceDialog 会处理重新查找匹配项的逻辑
+      editorRef.current.focus();
+    }
+  }, []);
+
+  // 处理全部替换
+  const handleReplaceAll = useCallback((newText: string) => {
+    setContent(newText);
+    setMatches([]);
+    setCurrentMatchIndex(-1);
+  }, []);
 
   // 处理云端更新：刷新并放弃本地更改
   const handleRefreshFromCloud = async (saveLocalFirst: boolean = false) => {
@@ -926,6 +1120,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       {/* 桌面端：显示所有按钮 */}
                       {!zenMode && (
                         <>
+                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入表格" onClick={handleInsertTable}><Table className="w-4 h-4 text-muted-foreground" /></Button>
+                          {/* 表格编辑辅助按钮（仅在表格内时显示） */}
+                          {isInTable && (
+                            <>
+                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="可视化编辑表格" onClick={() => setIsTableEditorOpen(true)}><Table className="w-4 h-4 text-blue-500" /></Button>
+                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="添加表格行" onClick={handleAddTableRow}><Rows className="w-4 h-4 text-muted-foreground" /></Button>
+                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="添加表格列" onClick={handleAddTableColumn}><Columns className="w-4 h-4 text-muted-foreground" /></Button>
+                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="格式化表格" onClick={handleFormatTable}><AlignLeft className="w-4 h-4 text-muted-foreground" /></Button>
+                            </>
+                          )}
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
@@ -1054,6 +1258,101 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
+                                    handleInsertTable();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleInsertTable();
+                                    setMoreMenuOpen(false);
+                                  }}
+                                >
+                                  <Table className="w-4 h-4" />
+                                  <span>插入表格</span>
+                                </button>
+                                {/* 表格编辑辅助按钮（仅在表格内时显示） */}
+                                {isInTable && (
+                                  <>
+                                    <button
+                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setIsTableEditorOpen(true);
+                                        setMoreMenuOpen(false);
+                                      }}
+                                      onTouchEnd={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setIsTableEditorOpen(true);
+                                        setMoreMenuOpen(false);
+                                      }}
+                                    >
+                                      <Table className="w-4 h-4 text-blue-500" />
+                                      <span>可视化编辑表格</span>
+                                    </button>
+                                    <button
+                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleAddTableRow();
+                                        setMoreMenuOpen(false);
+                                      }}
+                                      onTouchEnd={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleAddTableRow();
+                                        setMoreMenuOpen(false);
+                                      }}
+                                    >
+                                      <Rows className="w-4 h-4" />
+                                      <span>添加表格行</span>
+                                    </button>
+                                    <button
+                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleAddTableColumn();
+                                        setMoreMenuOpen(false);
+                                      }}
+                                      onTouchEnd={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleAddTableColumn();
+                                        setMoreMenuOpen(false);
+                                      }}
+                                    >
+                                      <Columns className="w-4 h-4" />
+                                      <span>添加表格列</span>
+                                    </button>
+                                    <button
+                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleFormatTable();
+                                        setMoreMenuOpen(false);
+                                      }}
+                                      onTouchEnd={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleFormatTable();
+                                        setMoreMenuOpen(false);
+                                      }}
+                                    >
+                                      <AlignLeft className="w-4 h-4" />
+                                      <span>格式化表格</span>
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     togglePin();
                                     setMoreMenuOpen(false);
                                   }}
@@ -1084,6 +1383,27 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                 >
                                   <Globe className={cn("w-4 h-4", isPublished ? "text-blue-500" : "")} />
                                   <span>{isPublished ? "取消发布" : "发布到 Web"}</span>
+                                </button>
+                                <div className="h-[1px] bg-border my-1"></div>
+                                <button
+                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setFindReplaceMode("find");
+                                    setIsFindReplaceOpen(true);
+                                    setMoreMenuOpen(false);
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setFindReplaceMode("find");
+                                    setIsFindReplaceOpen(true);
+                                    setMoreMenuOpen(false);
+                                  }}
+                                >
+                                  <Search className="w-4 h-4" />
+                                  <span>查找与替换</span>
                                 </button>
                                 <div className="h-[1px] bg-border my-1"></div>
                               </>
@@ -1198,6 +1518,19 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                 "flex-1 mx-auto w-full flex flex-col overflow-y-auto min-h-0",
                 zenMode ? "max-w-4xl px-8 py-12" : "max-w-3xl p-3 sm:p-4 md:p-8"
               )}>
+                  {/* 查找替换面板 */}
+                  {isFindReplaceOpen && (
+                    <FindReplaceDialog
+                      isOpen={isFindReplaceOpen}
+                      onClose={() => setIsFindReplaceOpen(false)}
+                      text={content}
+                      cursorPosition={editorRef.current?.selectionStart || 0}
+                      onFind={handleFind}
+                      onReplace={handleReplace}
+                      onReplaceAll={handleReplaceAll}
+                      mode={findReplaceMode}
+                    />
+                  )}
                   <Input
                     value={title}
                     onChange={(e) => handleContentChange(e.target.value, content)}
@@ -1270,6 +1603,47 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                     </div>
                   ) : (
                     <div className="relative flex-1 mt-4 min-h-0">
+                      {/* 表格编辑器对话框 */}
+                      {isTableEditorOpen && editorRef.current && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                          <div className="bg-background rounded-lg border border-border w-full max-w-4xl max-h-[90vh] overflow-auto">
+                            <TableEditor
+                              content={content}
+                              cursorPosition={editorRef.current.selectionStart}
+                              onSave={(newContent) => {
+                                setContent(newContent);
+                                handleContentChange(title, newContent);
+                                setIsTableEditorOpen(false);
+                              }}
+                              onCancel={() => setIsTableEditorOpen(false)}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* 内联表格编辑器（当光标在表格内时显示在 Textarea 上方） */}
+                      {isInTable && editorRef.current && (
+                        <div className="mb-4 border border-border rounded-lg p-4 bg-card/50">
+                          <div className="text-xs text-muted-foreground mb-2">
+                            📊 可视化表格编辑
+                          </div>
+                          <InlineTableEditor
+                            content={content}
+                            cursorPosition={editorRef.current.selectionStart}
+                            onUpdate={(newContent) => {
+                              setContent(newContent);
+                              handleContentChange(title, newContent);
+                              // 更新后重新聚焦到 Textarea
+                              setTimeout(() => {
+                                if (editorRef.current) {
+                                  editorRef.current.focus();
+                                }
+                              }, 0);
+                            }}
+                          />
+                        </div>
+                      )}
+                      
                       <Textarea
                         ref={editorRef}
                         value={content}
@@ -1313,6 +1687,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         </div>
                       )}
                     </div>
+                  )}
+                  
+                  {/* 笔记统计信息 */}
+                  {currentNote && (
+                    <NoteStats
+                      content={content}
+                      createdAt={currentNote.created_at}
+                      updatedAt={currentNote.updated_at}
+                    />
                   )}
               </div>
           </div>

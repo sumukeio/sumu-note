@@ -10,7 +10,8 @@ import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogOut, Loader2, Download, Search } from "lucide-react";
-import { exportUserNotesToZip } from "@/lib/export-utils";
+import ExportDialog from "@/components/ExportDialog";
+import { cn } from "@/lib/utils";
 
 // 高亮关键词的工具函数
 function highlightText(text: string, query: string): React.ReactNode {
@@ -52,18 +53,19 @@ export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
-  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 
   // 🔥 状态：当前查看的文件夹 (null 代表看根目录文件夹列表)
   const [currentFolder, setCurrentFolder] = useState<{id: string, name: string} | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(-1);
   
   // 防抖和请求取消相关
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const searchResultsRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -134,8 +136,11 @@ export default function DashboardPage() {
     if (error) {
       console.error(error);
       setSearchResults([]);
+      setSelectedResultIndex(-1);
     } else {
       setSearchResults(data || []);
+      // 重置选中索引，如果有结果则选中第一个
+      setSelectedResultIndex(data && data.length > 0 ? 0 : -1);
     }
     } catch (err: any) {
       // 忽略取消请求的错误
@@ -163,7 +168,8 @@ export default function DashboardPage() {
 
     if (!value.trim() || !user?.id) {
       setSearchResults([]);
-    setSearching(false);
+      setSearching(false);
+      setSelectedResultIndex(-1);
       return;
     }
 
@@ -182,24 +188,69 @@ export default function DashboardPage() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-  };
+    };
   }, []);
 
-  const handleExport = async () => {
-    if (!user?.id || exporting) return;
-    try {
-      setExporting(true);
-      setExportMessage(null);
-      await exportUserNotesToZip(user.id);
-      setExportMessage("导出成功，已下载备份 zip 文件。");
-    } catch (error: any) {
-      console.error(error);
-      setExportMessage(error?.message || "导出失败，请稍后重试。");
-    } finally {
-      setExporting(false);
-      // 3 秒后自动清理提示
-      setTimeout(() => setExportMessage(null), 3000);
+  // 搜索结果键盘导航
+  useEffect(() => {
+    if (!searchQuery.trim() || searchResults.length === 0) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 只在搜索结果区域时响应键盘事件
+      if (searchResults.length === 0) return;
+
+      // 上下箭头键切换选中结果
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedResultIndex((prev) => {
+          const next = prev < searchResults.length - 1 ? prev + 1 : 0; // 循环到第一个
+          // 滚动到选中结果
+          scrollToSelectedResult(next);
+          return next;
+        });
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedResultIndex((prev) => {
+          const next = prev > 0 ? prev - 1 : searchResults.length - 1; // 循环到最后一个
+          // 滚动到选中结果
+          scrollToSelectedResult(next);
+          return next;
+        });
+        return;
+      }
+
+      // Enter 键打开选中的结果
+      if (e.key === "Enter" && selectedResultIndex >= 0 && selectedResultIndex < searchResults.length) {
+        e.preventDefault();
+        const note = searchResults[selectedResultIndex];
+        const searchParam = searchQuery.trim() 
+          ? `?search=${encodeURIComponent(searchQuery.trim())}` 
+          : '';
+        router.push(`/notes/${encodeURIComponent(note.id)}${searchParam}`);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [searchQuery, searchResults, selectedResultIndex, router]);
+
+  // 滚动到选中的结果
+  const scrollToSelectedResult = (index: number) => {
+    if (searchResultsRef.current && index >= 0) {
+      const items = searchResultsRef.current.querySelectorAll("li");
+      if (items[index]) {
+        items[index].scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
     }
+  };
+
+  const handleExport = () => {
+    if (!user?.id) return;
+    setIsExportDialogOpen(true);
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -269,36 +320,21 @@ export default function DashboardPage() {
                 variant="ghost"
                 size="sm"
                 onClick={handleExport}
-                disabled={exporting}
                 className="h-8 px-2 text-sm hidden sm:flex items-center gap-1.5"
-                title="导出备份"
+                title="导出笔记"
               >
-                {exporting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span className="hidden lg:inline">导出中...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span className="hidden lg:inline">导出</span>
-                  </>
-                )}
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">导出</span>
               </Button>
               {/* 移动端导出按钮 */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={handleExport}
-                disabled={exporting}
                 className="h-8 w-8 sm:hidden"
-                title="导出备份"
+                title="导出笔记"
               >
-                {exporting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
+                <Download className="w-4 h-4" />
               </Button>
               <ModeToggle />
               <Button variant="ghost" size="icon" onClick={handleSignOut} className="h-8 w-8" title="退出登录">
@@ -311,11 +347,6 @@ export default function DashboardPage() {
 
       {/* 内容区 */}
       <main className="max-w-4xl mx-auto py-8 px-4">
-        {exportMessage && (
-          <div className="mb-4 text-sm text-center text-muted-foreground bg-accent/60 border border-border px-3 py-2 rounded-lg">
-            {exportMessage}
-          </div>
-        )}
         {searchQuery.trim() ? (
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -335,17 +366,23 @@ export default function DashboardPage() {
                 没有找到与 “{searchQuery}” 相关的笔记。
               </p>
             ) : (
-              <ul className="space-y-2 text-sm">
-                {searchResults.map((note) => (
+              <ul ref={searchResultsRef} className="space-y-2 text-sm">
+                {searchResults.map((note, index) => (
                   <li
                     key={note.id}
-                    className="rounded-lg border border-border bg-card/60 px-3 py-2 cursor-pointer hover:bg-accent/60 transition-colors"
+                    className={cn(
+                      "rounded-lg border px-3 py-2 cursor-pointer transition-colors",
+                      index === selectedResultIndex
+                        ? "border-blue-500 bg-blue-500/10 shadow-[0_0_0_1px_#3b82f6]"
+                        : "border-border bg-card/60 hover:bg-accent/60"
+                    )}
                     onClick={() => {
                       const searchParam = searchQuery.trim() 
                         ? `?search=${encodeURIComponent(searchQuery.trim())}` 
                         : '';
                       router.push(`/notes/${encodeURIComponent(note.id)}${searchParam}`);
                     }}
+                    onMouseEnter={() => setSelectedResultIndex(index)}
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="font-medium truncate">
@@ -383,7 +420,15 @@ export default function DashboardPage() {
             />
         )}
       </main>
-
+      
+      {/* 导出对话框 */}
+      {user?.id && (
+        <ExportDialog
+          isOpen={isExportDialogOpen}
+          onClose={() => setIsExportDialogOpen(false)}
+          userId={user.id}
+        />
+      )}
     </div>
   );
 }

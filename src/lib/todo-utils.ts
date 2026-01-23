@@ -326,30 +326,38 @@ function parseDateTime(
 export function formatDueDate(date: string | null): string {
   if (!date) return "";
 
+  // 使用本地时区解析日期
   const dueDate = new Date(date);
   const now = new Date();
+  
+  // 获取本地时区的今天（只比较日期部分，忽略时间）
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  // 获取截止日期的本地时区日期部分（只比较日期，忽略时间）
   const dueDateOnly = new Date(
     dueDate.getFullYear(),
     dueDate.getMonth(),
     dueDate.getDate()
   );
 
+  // 比较日期（只比较年月日，忽略时间）
   if (dueDateOnly.getTime() === today.getTime()) {
     return "今天";
   } else if (dueDateOnly.getTime() === tomorrow.getTime()) {
     return "明天";
   } else {
-    const diffDays = Math.ceil(
-      (dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-    );
+    // 计算日期差（天数）
+    const diffTime = dueDateOnly.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
     if (diffDays < 0) {
       return `${Math.abs(diffDays)}天前`;
     } else if (diffDays <= 7) {
       return `${diffDays}天后`;
     } else {
+      // 使用本地时区格式化日期
       return dueDate.toLocaleDateString("zh-CN", {
         month: "short",
         day: "numeric",

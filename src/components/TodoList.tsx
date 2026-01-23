@@ -119,6 +119,7 @@ export default function TodoList({
   } | null>(null);
 
   // 同步外部 todos 变化
+  // 注意：过滤逻辑已经在 TodoListView 中处理了，这里直接使用传入的 todos
   useEffect(() => {
     setLocalTodos(todos);
   }, [todos]);
@@ -222,39 +223,52 @@ export default function TodoList({
     const newStatus = todo.status === "done" ? "todo" : "done";
     const newCompletedAt = newStatus === "done" ? new Date().toISOString() : null;
     
-    setLocalTodos((prev) =>
-      prev.map((t) =>
-        t.id === todo.id
-          ? {
-              ...t,
-              status: newStatus,
-              completed_at: newCompletedAt,
-            }
-          : t
-      )
-    );
+    setLocalTodos((prev) => {
+      // 如果任务已完成，从列表中移除（已完成的任务只应该出现在"已完成"清单中）
+      if (newStatus === "done") {
+        return prev.filter((t) => t.id !== todo.id);
+      } else {
+        // 如果取消完成，更新状态
+        return prev.map((t) =>
+          t.id === todo.id
+            ? {
+                ...t,
+                status: newStatus,
+                completed_at: newCompletedAt,
+              }
+            : t
+        );
+      }
+    });
 
     try {
       if (todo.status === "done") {
         await uncompleteTodo(todo.id);
+        // 取消完成后，任务应该重新出现在列表中，需要刷新
+        onRefresh?.();
       } else {
         await completeTodo(todo.id);
+        // 完成后，任务已经从列表中移除，不需要刷新
       }
-      // 不调用 onRefresh，保持流畅的用户体验
     } catch (error) {
       console.error("Failed to toggle todo:", error);
       // 回滚到原始状态
-      setLocalTodos((prev) =>
-        prev.map((t) =>
-          t.id === todo.id
-            ? {
-                ...t,
-                status: todo.status,
-                completed_at: todo.completed_at,
-              }
-            : t
-        )
-      );
+      setLocalTodos((prev) => {
+        // 如果任务原本不在列表中（已完成），回滚时需要重新添加
+        if (todo.status === "done" && !prev.some((t) => t.id === todo.id)) {
+          return [...prev, todo];
+        } else {
+          return prev.map((t) =>
+            t.id === todo.id
+              ? {
+                  ...t,
+                  status: todo.status,
+                  completed_at: todo.completed_at,
+                }
+              : t
+          );
+        }
+      });
     } finally {
       setCompletingIds((prev) => {
         const next = new Set(prev);
@@ -289,6 +303,23 @@ export default function TodoList({
   // 处理上下文菜单更新
   const handleContextMenuUpdate = () => {
     setContextMenu(null);
+    onRefresh?.();
+  };
+
+  // 处理任务更新（从 TodoDetail 返回时）
+  const handleTodoUpdate = (updatedTodo?: Todo) => {
+    if (updatedTodo) {
+      // 如果任务已完成，立即从列表中移除
+      if (updatedTodo.status === "done") {
+        setLocalTodos((prev) => prev.filter((t) => t.id !== updatedTodo.id));
+      } else {
+        // 如果任务未完成，更新本地状态
+        setLocalTodos((prev) =>
+          prev.map((t) => (t.id === updatedTodo.id ? updatedTodo : t))
+        );
+      }
+    }
+    // 触发刷新以确保数据同步
     onRefresh?.();
   };
 
@@ -663,7 +694,7 @@ export default function TodoList({
                             isCompleting={completingIds.has(todo.id)}
                             onToggleComplete={() => handleToggleComplete(todo)}
                             userId={userId}
-                            onUpdate={onRefresh ?? (() => {})}
+                            onUpdate={handleTodoUpdate}
                             isSelectMode={isSelectMode}
                             isSelected={selectedIds.has(todo.id)}
                             onToggleSelect={() => handleToggleSelect(todo.id)}

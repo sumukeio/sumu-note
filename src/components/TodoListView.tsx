@@ -58,18 +58,22 @@ export default function TodoListView({
       let dueDateTo: string | null = null;
 
       if (listId === "today") {
-        // 今天的任务：截止日期在今天
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // 今天的任务：截止日期在今天（基于当前时区的当前日期），不限制清单
+        // 使用本地时区计算今天的开始和结束时间
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
+        // 转换为 ISO 字符串，确保时区正确
         dueDateFrom = today.toISOString();
         dueDateTo = tomorrow.toISOString();
-        // "今天"视图应该显示所有状态的任务
+        // "今天"视图应该显示所有状态的任务，不限制清单
         actualStatusFilter = "all";
+        actualListId = undefined; // 不进行清单筛选，显示所有清单中今天的任务
       } else if (listId === "done") {
-        // 已完成的任务：强制使用"done"状态
+        // 已完成的任务：不限制清单，只按状态筛选
         actualStatusFilter = "done";
+        actualListId = undefined; // 不进行清单筛选，显示所有清单中已完成的任务
       } else if (listId === null) {
         // "全部任务"视图：不设置 list_id，这样 getTodos 不会进行清单筛选
         actualListId = undefined;
@@ -119,7 +123,37 @@ export default function TodoListView({
       }
 
       const result = await getTodos(userId, queryOptions);
-      setTodos(result.todos);
+      
+      let filteredTodos = result.todos;
+      
+      // 如果当前是"今天"视图，使用本地时区再次过滤，确保只显示截止日期确实是今天的任务
+      if (listId === "today") {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        filteredTodos = result.todos.filter((todo) => {
+          if (!todo.due_date) return false;
+          const dueDate = new Date(todo.due_date);
+          // 获取截止日期的本地时区日期部分
+          const dueDateOnly = new Date(
+            dueDate.getFullYear(),
+            dueDate.getMonth(),
+            dueDate.getDate()
+          );
+          // 只显示截止日期是今天的任务
+          return dueDateOnly.getTime() >= today.getTime() && dueDateOnly.getTime() < tomorrow.getTime();
+        });
+      }
+      
+      // 如果当前是普通清单视图（不是"今天"、"已完成"或"全部任务"），过滤掉已完成的任务
+      // 已完成的任务只应该出现在"已完成"清单中
+      if (listId !== "today" && listId !== "done" && listId !== null && finalListId !== undefined) {
+        filteredTodos = filteredTodos.filter((todo) => todo.status !== "done");
+      }
+      
+      setTodos(filteredTodos);
     } catch (error) {
       console.error("Failed to load todos:", error);
     } finally {
@@ -180,6 +214,10 @@ export default function TodoListView({
       // 检查清单筛选
       if (listId !== "today" && listId !== "done" && listId !== null) {
         if (newTodo.list_id !== listId) {
+          shouldShow = false;
+        }
+        // 已完成的任务不应该出现在普通清单中，只出现在"已完成"清单
+        if (newTodo.status === "done") {
           shouldShow = false;
         }
       }
@@ -284,12 +322,14 @@ export default function TodoListView({
   switch (viewMode) {
     case "list":
       return (
-        <TodoList
-          todos={todos}
-          userId={userId}
-          onRefresh={loadTodos}
-          searchQuery={searchQuery}
-        />
+              <TodoList
+                todos={todos}
+                userId={userId}
+                onRefresh={() => {
+                  loadTodos();
+                }}
+                searchQuery={searchQuery}
+              />
       );
     case "calendar":
       return (

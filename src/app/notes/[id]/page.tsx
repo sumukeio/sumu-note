@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Link2, Loader2 } from "lucide-react";
+import { ArrowLeft, Link2, Loader2, ChevronUp, ChevronDown, X } from "lucide-react";
+import { findAllMatches, getNextMatchIndex, getPreviousMatchIndex, type Match } from "@/lib/search-utils";
+import { cn } from "@/lib/utils";
 
 interface Note {
   id: string;
@@ -32,6 +34,11 @@ export default function NoteDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
+  
+  // 搜索结果切换相关状态
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
+  const [highlightElements, setHighlightElements] = useState<HTMLElement[]>([]);
 
   const noteIdOrTitle = decodeURIComponent(params.id);
   const searchQuery = searchParams.get('search') || '';
@@ -123,93 +130,179 @@ export default function NoteDetailPage() {
     run();
   }, [noteIdOrTitle]);
 
-  // 滚动到关键词位置的函数
+  // 查找所有匹配项并高亮
   useEffect(() => {
-    if (!searchQuery.trim() || !note?.content || hasScrolledRef.current || !contentRef.current) {
+    if (!searchQuery.trim() || !note?.content || !contentRef.current) {
+      setMatches([]);
+      setCurrentMatchIndex(-1);
+      // 清除之前的高亮
+      highlightElements.forEach(el => {
+        if (el.parentNode) {
+          const parent = el.parentNode;
+          const textNode = document.createTextNode(el.textContent || '');
+          parent.replaceChild(textNode, el);
+          parent.normalize();
+        }
+      });
+      setHighlightElements([]);
+      hasScrolledRef.current = false;
       return;
     }
 
     // 等待 ReactMarkdown 渲染完成
     const timer = setTimeout(() => {
+      if (!contentRef.current) return;
+
       const query = searchQuery.trim();
+      // 使用 search-utils 查找所有匹配项（基于纯文本）
+      const textMatches = findAllMatches(note.content, query, false);
+      setMatches(textMatches);
+
+      // 清除之前的高亮
+      highlightElements.forEach(el => {
+        if (el.parentNode) {
+          const parent = el.parentNode;
+          const textNode = document.createTextNode(el.textContent || '');
+          parent.replaceChild(textNode, el);
+          parent.normalize();
+        }
+      });
+
+      // 在 DOM 中查找并高亮所有匹配项
       const lowerQuery = query.toLowerCase();
-      
-      // 查找所有文本节点
       const walker = document.createTreeWalker(
-        contentRef.current!,
+        contentRef.current,
         NodeFilter.SHOW_TEXT,
         null
       );
-      
+
+      const newHighlights: HTMLElement[] = [];
       let node: Node | null;
-      let targetNode: Node | null = null;
-      let targetOffset = 0;
-      
-      while (node = walker.nextNode()) {
+
+      while ((node = walker.nextNode())) {
         const nodeText = node.textContent || '';
         const nodeLowerText = nodeText.toLowerCase();
-        const nodeIndex = nodeLowerText.indexOf(lowerQuery);
         
-        if (nodeIndex !== -1) {
-          targetNode = node;
-          targetOffset = nodeIndex;
-          break;
-        }
-      }
-      
-      if (targetNode && targetNode.parentElement) {
-        try {
-          // 创建范围并选中关键词
-          const range = document.createRange();
-          range.setStart(targetNode, targetOffset);
-          range.setEnd(targetNode, targetOffset + query.length);
-          
-          // 高亮关键词
-          const highlight = document.createElement('mark');
-          highlight.className = 'bg-yellow-200 dark:bg-yellow-900 px-0.5 rounded';
-          highlight.style.scrollMarginTop = '100px'; // 为固定头部留出空间
-          
+        // 查找所有匹配位置
+        let searchIndex = 0;
+        while ((searchIndex = nodeLowerText.indexOf(lowerQuery, searchIndex)) !== -1) {
           try {
+            const range = document.createRange();
+            range.setStart(node, searchIndex);
+            range.setEnd(node, searchIndex + query.length);
+            
+            const highlight = document.createElement('mark');
+            highlight.className = 'bg-yellow-200 dark:bg-yellow-900 px-0.5 rounded search-match';
+            highlight.style.scrollMarginTop = '100px';
+            
             range.surroundContents(highlight);
+            newHighlights.push(highlight);
+            searchIndex += query.length;
           } catch (e) {
-            // 如果无法包围（跨节点），则只选中并滚动
-            window.getSelection()?.removeAllRanges();
-            window.getSelection()?.addRange(range);
-            targetNode.parentElement.scrollIntoView({ 
-              behavior: 'smooth', 
-              block: 'center',
-              inline: 'nearest'
-            });
-            hasScrolledRef.current = true;
-            return;
+            // 如果无法包围（跨节点），跳过
+            searchIndex += query.length;
           }
-          
-          // 滚动到高亮位置
-          highlight.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'center',
-            inline: 'nearest'
-          });
-          
-          hasScrolledRef.current = true;
-          
-          // 3秒后移除高亮
-          setTimeout(() => {
-            if (highlight.parentNode) {
-              const parent = highlight.parentNode;
-              const textNode = document.createTextNode(highlight.textContent || '');
-              parent.replaceChild(textNode, highlight);
-              parent.normalize();
-            }
-          }, 3000);
-        } catch (err) {
-          console.warn('Failed to highlight keyword:', err);
         }
       }
-    }, 500); // 给 ReactMarkdown 足够的时间渲染
 
-    return () => clearTimeout(timer);
+      setHighlightElements(newHighlights);
+      
+      // 如果有匹配项，滚动到第一个
+      if (textMatches.length > 0 && !hasScrolledRef.current) {
+        setCurrentMatchIndex(0);
+        scrollToMatch(0, newHighlights);
+        hasScrolledRef.current = true;
+      } else if (textMatches.length > 0) {
+        // 如果已经滚动过，确保当前索引有效
+        if (currentMatchIndex < 0 || currentMatchIndex >= newHighlights.length) {
+          setCurrentMatchIndex(0);
+        }
+        scrollToMatch(currentMatchIndex >= 0 ? currentMatchIndex : 0, newHighlights);
+      }
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+    };
   }, [searchQuery, note?.content]);
+
+  // 滚动到指定匹配项
+  const scrollToMatch = (index: number, highlights: HTMLElement[] = highlightElements) => {
+    if (index < 0 || index >= highlights.length) return;
+    
+    const highlight = highlights[index];
+    if (highlight) {
+      // 移除所有高亮的当前样式
+      highlights.forEach((el) => {
+        el.classList.remove('ring-2', 'ring-blue-500');
+      });
+      
+      // 添加当前高亮的样式
+      highlight.classList.add('ring-2', 'ring-blue-500');
+      
+      highlight.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'nearest'
+      });
+    }
+  };
+
+  // 处理下一个匹配项
+  const handleNextMatch = useCallback(() => {
+    if (matches.length === 0) return;
+    const nextIndex = getNextMatchIndex(currentMatchIndex, matches);
+    setCurrentMatchIndex(nextIndex);
+    // 使用 setTimeout 确保 highlightElements 已更新
+    setTimeout(() => scrollToMatch(nextIndex), 0);
+  }, [matches, currentMatchIndex]);
+
+  // 处理上一个匹配项
+  const handlePreviousMatch = useCallback(() => {
+    if (matches.length === 0) return;
+    const prevIndex = getPreviousMatchIndex(currentMatchIndex, matches);
+    setCurrentMatchIndex(prevIndex);
+    // 使用 setTimeout 确保 highlightElements 已更新
+    setTimeout(() => scrollToMatch(prevIndex), 0);
+  }, [matches, currentMatchIndex]);
+
+  // 键盘快捷键监听
+  useEffect(() => {
+    if (!searchQuery.trim() || matches.length === 0) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+G 或 Cmd+G：下一个匹配项
+      if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        handleNextMatch();
+        return;
+      }
+
+      // Ctrl+Shift+G 或 Cmd+Shift+G：上一个匹配项
+      if ((e.ctrlKey || e.metaKey) && e.key === 'G' && e.shiftKey) {
+        e.preventDefault();
+        handlePreviousMatch();
+        return;
+      }
+
+      // F3：下一个匹配项
+      if (e.key === 'F3' && !e.shiftKey) {
+        e.preventDefault();
+        handleNextMatch();
+        return;
+      }
+
+      // Shift+F3：上一个匹配项
+      if (e.key === 'F3' && e.shiftKey) {
+        e.preventDefault();
+        handlePreviousMatch();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [searchQuery, matches, currentMatchIndex]);
 
   const handleBack = () => {
     router.back();
@@ -265,11 +358,41 @@ export default function NoteDetailPage() {
             <ArrowLeft className="w-4 h-4 mr-1" />
             返回
           </Button>
-          <span className="text-xs text-muted-foreground">
-            {note.updated_at
-              ? new Date(note.updated_at).toLocaleString()
-              : ""}
-          </span>
+          <div className="flex items-center gap-4">
+            {/* 搜索结果导航 */}
+            {searchQuery.trim() && matches.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-accent/50 rounded-lg border border-border">
+                <span className="text-xs text-muted-foreground">
+                  {currentMatchIndex + 1}/{matches.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={handlePreviousMatch}
+                    title="上一个 (Ctrl+Shift+G)"
+                  >
+                    <ChevronUp className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={handleNextMatch}
+                    title="下一个 (Ctrl+G)"
+                  >
+                    <ChevronDown className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            <span className="text-xs text-muted-foreground">
+              {note.updated_at
+                ? new Date(note.updated_at).toLocaleString()
+                : ""}
+            </span>
+          </div>
         </header>
 
         <main className="space-y-6">

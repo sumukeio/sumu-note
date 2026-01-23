@@ -126,11 +126,33 @@ function KanbanCard({
         )}
 
         <div className="flex items-center gap-2 flex-wrap">
-          {todo.due_date && (
-            <span className="text-xs text-muted-foreground">
-              {formatDueDate(todo.due_date)}
-            </span>
-          )}
+          {todo.due_date && (() => {
+            // 使用本地时区比较日期
+            const dueDate = new Date(todo.due_date);
+            const now = new Date();
+            // 获取本地时区的今天（只比较日期部分）
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            // 获取截止日期的本地时区日期部分（只比较日期，忽略时间）
+            const dueDateOnly = new Date(
+              dueDate.getFullYear(),
+              dueDate.getMonth(),
+              dueDate.getDate()
+            );
+            const isOverdue = todo.status !== "done" && dueDateOnly.getTime() < today.getTime();
+            
+            return (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {formatDueDate(todo.due_date)}
+                </span>
+                {isOverdue && (
+                  <span className="text-xs px-1.5 py-0.5 rounded text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 font-medium">
+                    已过期
+                  </span>
+                )}
+              </div>
+            );
+          })()}
           {todo.tags.length > 0 && (
             <div className="flex items-center gap-1">
               {todo.tags.slice(0, 2).map((tag) => (

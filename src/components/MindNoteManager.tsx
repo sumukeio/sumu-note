@@ -68,6 +68,7 @@ function DraggableFolderCard({
   onClick,
   onTouchStart,
   onTouchEnd,
+  onTouchMove,
   onMouseDown,
   onMouseUp,
 }: {
@@ -75,8 +76,9 @@ function DraggableFolderCard({
   isSelected: boolean;
   isSelectionMode: boolean;
   onClick: () => void;
-  onTouchStart: () => void;
+  onTouchStart: (e: React.TouchEvent) => void;
   onTouchEnd: () => void;
+  onTouchMove: (e: React.TouchEvent) => void;
   onMouseDown: () => void;
   onMouseUp: () => void;
 }) {
@@ -149,6 +151,7 @@ function DraggableMindNoteCard({
   onClick,
   onTouchStart,
   onTouchEnd,
+  onTouchMove,
   onMouseDown,
   onMouseUp,
 }: {
@@ -156,8 +159,9 @@ function DraggableMindNoteCard({
   isSelected: boolean;
   isSelectionMode: boolean;
   onClick: () => void;
-  onTouchStart: () => void;
+  onTouchStart: (e: React.TouchEvent) => void;
   onTouchEnd: () => void;
+  onTouchMove: (e: React.TouchEvent) => void;
   onMouseDown: () => void;
   onMouseUp: () => void;
 }) {
@@ -195,6 +199,7 @@ function DraggableMindNoteCard({
       )}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
+      onTouchMove={onTouchMove}
       onMouseDown={onMouseDown}
       onMouseUp={onMouseUp}
       onClick={onClick}
@@ -304,6 +309,8 @@ export default function MindNoteManager({
   const isSelectionMode = selectedIds.size > 0;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const ignoreClickRef = useRef(false);
+  // 记录初始触摸位置，用于检测滑动
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 10 } }),
@@ -521,9 +528,18 @@ export default function MindNoteManager({
     setSelectedIds(newSet);
   };
 
-  const handleTouchStart = (id: string) => {
+  const handleTouchStart = (id: string, event?: React.TouchEvent) => {
     if (isSelectionMode) return;
     ignoreClickRef.current = false;
+    
+    // 记录初始触摸位置
+    if (event && event.touches.length > 0) {
+      touchStartPosRef.current = {
+        x: event.touches[0].clientX,
+        y: event.touches[0].clientY,
+      };
+    }
+    
     timerRef.current = setTimeout(() => {
       const newSet = new Set(selectedIds);
       newSet.add(id);
@@ -535,11 +551,36 @@ export default function MindNoteManager({
     }, 500);
   };
 
+  const handleTouchMove = (event: React.TouchEvent) => {
+    // 如果没有初始触摸位置，不处理
+    if (!touchStartPosRef.current || !event.touches.length) return;
+    
+    // 计算移动距离
+    const currentX = event.touches[0].clientX;
+    const currentY = event.touches[0].clientY;
+    const deltaX = currentX - touchStartPosRef.current.x;
+    const deltaY = currentY - touchStartPosRef.current.y;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    
+    // 如果移动距离超过阈值（12px），认为是滑动操作，清除长按定时器
+    const SLIDE_THRESHOLD = 12;
+    if (distance > SLIDE_THRESHOLD) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      // 清除初始触摸位置
+      touchStartPosRef.current = null;
+    }
+  };
+
   const handleTouchEnd = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    // 清除初始触摸位置
+    touchStartPosRef.current = null;
   };
 
   const handleFolderClick = (folder: Folder) => {
@@ -680,8 +721,9 @@ export default function MindNoteManager({
               isSelected={selectedIds.has(folder.id)}
               isSelectionMode={isSelectionMode}
               onClick={() => handleFolderClick(folder)}
-              onTouchStart={() => handleTouchStart(folder.id)}
+              onTouchStart={(e) => handleTouchStart(folder.id, e)}
               onTouchEnd={handleTouchEnd}
+              onTouchMove={handleTouchMove}
               onMouseDown={() => handleTouchStart(folder.id)}
               onMouseUp={handleTouchEnd}
             />
@@ -695,8 +737,9 @@ export default function MindNoteManager({
               isSelected={selectedIds.has(note.id)}
               isSelectionMode={isSelectionMode}
               onClick={() => handleNoteClick(note)}
-              onTouchStart={() => handleTouchStart(note.id)}
+              onTouchStart={(e) => handleTouchStart(note.id, e)}
               onTouchEnd={handleTouchEnd}
+              onTouchMove={handleTouchMove}
               onMouseDown={() => handleTouchStart(note.id)}
               onMouseUp={handleTouchEnd}
             />

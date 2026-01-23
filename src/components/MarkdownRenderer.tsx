@@ -70,6 +70,48 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
               </a>
             );
           },
+          // 自定义表格组件，确保表格正确渲染
+          table: ({ children, ...props }) => (
+            <div className="overflow-x-auto my-4">
+              <table
+                {...props}
+                className="min-w-full border-collapse border border-border"
+              >
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children, ...props }) => (
+            <thead {...props} className="bg-accent/50">
+              {children}
+            </thead>
+          ),
+          tbody: ({ children, ...props }) => (
+            <tbody {...props}>
+              {children}
+            </tbody>
+          ),
+          tr: ({ children, ...props }) => (
+            <tr {...props} className="border-b border-border">
+              {children}
+            </tr>
+          ),
+          th: ({ children, ...props }) => (
+            <th
+              {...props}
+              className="border border-border px-4 py-2 text-left font-semibold"
+            >
+              {children}
+            </th>
+          ),
+          td: ({ children, ...props }) => (
+            <td
+              {...props}
+              className="border border-border px-4 py-2"
+            >
+              {children}
+            </td>
+          ),
         }}
       >
         {processedContent}
