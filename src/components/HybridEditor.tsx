@@ -159,9 +159,6 @@ export default function HybridEditor({
         content={content}
         cursorPosition={cursorPosition}
         onUpdate={handleTableUpdate}
-        onBlur={() => {
-          // 表格失焦时，可能需要隐藏表格编辑器，但这里我们保持显示
-        }}
       />
       
       {/* 表格后的文本 */}
