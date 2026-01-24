@@ -29,25 +29,10 @@ export default function InlineTableEditor({
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const cellInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-
-  // 初始化表格数据
-  useEffect(() => {
-    if (tableInfo && tableInfo.rows.length > 0) {
-      setTableData(tableInfo.rows);
-    } else {
-      setTableData([]);
-    }
-  }, [tableInfo]);
-
-  if (!tableInfo) {
-    return null;
-  }
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 获取单元格的 key
   const getCellKey = (row: number, col: number) => `${row}-${col}`;
-
-  // 保存表格的定时器
-  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 保存表格（转换为 Markdown 并更新内容）
   const saveTable = useCallback(() => {
@@ -67,6 +52,20 @@ export default function InlineTableEditor({
 
     onUpdate(newContent);
   }, [tableData, tableInfo, content, onUpdate]);
+
+  // 初始化表格数据
+  useEffect(() => {
+    if (tableInfo && tableInfo.rows.length > 0) {
+      setTableData(tableInfo.rows);
+    } else {
+      setTableData([]);
+    }
+  }, [tableInfo]);
+
+  // 早期返回必须在所有 hooks 之后
+  if (!tableInfo) {
+    return null;
+  }
   
   // 更新单元格内容
   const handleCellChange = useCallback(
@@ -78,33 +77,6 @@ export default function InlineTableEditor({
     },
     [tableData]
   );
-  
-  // 防抖保存表格
-  useEffect(() => {
-    if (tableData.length > 0 && tableInfo) {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-      saveTimerRef.current = setTimeout(() => {
-        saveTable();
-      }, 1000);
-    }
-    
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [tableData, tableInfo, saveTable]);
-  
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, []);
 
   // 单元格失焦时
   const handleCellBlur = useCallback(() => {

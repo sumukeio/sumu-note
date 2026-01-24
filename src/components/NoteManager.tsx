@@ -356,10 +356,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           pendingSelfUpdateRef.current = latestUpdatedAt;
           lastSaveTimeRef.current = new Date(latestUpdatedAt).getTime();
           
-          // 延迟清除保存标记，确保实时订阅事件能够被正确过滤（2秒后）
+          // 延迟清除保存标记，确保实时订阅事件能够被正确过滤（3秒后，给实时事件更多时间）
           setTimeout(() => {
             isSavingRef.current = false;
-          }, 2000);
+            // 清除 pendingSelfUpdateRef，避免后续误判
+            pendingSelfUpdateRef.current = null;
+          }, 3000);
           
           // 创建版本历史（异步，不阻塞保存流程）
           createNoteVersion(currentNote.id, userId, finalTitle, currentContent, currentTags).catch(err => {
@@ -784,6 +786,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           const updatedNote = payload.new as any;
           const updatedAt = updatedNote.updated_at;
           const updatedAtTimestamp = new Date(updatedAt).getTime();
+          const currentTime = Date.now();
           
           // 如果是刚刚自己保存的同一条 updated_at，直接忽略一次
           if (pendingSelfUpdateRef.current && updatedAt === pendingSelfUpdateRef.current) {
@@ -794,7 +797,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           // 如果正在保存，忽略这个事件（可能是自己触发的）
           if (isSavingRef.current) {
             const timeSinceLastSave = updatedAtTimestamp - lastSaveTimeRef.current;
-            if (timeSinceLastSave >= 0 && timeSinceLastSave < 2000) {
+            // 如果时间差在 3 秒内，很可能是自己的保存操作
+            if (timeSinceLastSave >= 0 && timeSinceLastSave < 3000) {
               return;
             }
           }
@@ -802,11 +806,28 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           // 如果这次更新不是我们自己保存的（时间戳不同），则提示用户
           if (
             lastSavedTimestampRef.current &&
-            updatedAt !== lastSavedTimestampRef.current &&
-            updatedAtTimestamp > new Date(lastSavedTimestampRef.current).getTime()
+            updatedAt !== lastSavedTimestampRef.current
           ) {
-            setCloudUpdateNote(updatedNote);
-            setCloudUpdateDialogOpen(true);
+            const lastSavedTimestamp = new Date(lastSavedTimestampRef.current).getTime();
+            const timeDiff = updatedAtTimestamp - lastSavedTimestamp;
+            
+            // 更严格的检查：只有时间差大于 3 秒，且确实是更新的时间戳，才认为是云端更新
+            // 这样可以避免自己的保存操作被误判
+            if (timeDiff > 3000 && updatedAtTimestamp > lastSavedTimestamp) {
+              // 额外检查：如果距离上次保存时间很短（5秒内），且我们正在保存，忽略
+              const timeSinceLastSave = currentTime - lastSaveTimeRef.current;
+              if (timeSinceLastSave < 5000 && isSavingRef.current) {
+                return;
+              }
+              
+              // 最后检查：如果 pendingSelfUpdateRef 还存在，说明可能是自己的更新还没处理完
+              if (pendingSelfUpdateRef.current) {
+                return;
+              }
+              
+              setCloudUpdateNote(updatedNote);
+              setCloudUpdateDialogOpen(true);
+            }
           }
         }
       )
