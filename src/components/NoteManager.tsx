@@ -18,7 +18,7 @@ import { isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes 
 import NoteStats from "@/components/NoteStats";
 import FindReplaceDialog from "@/components/FindReplaceDialog";
 import TableEditor from "@/components/TableEditor";
-import InlineTableEditor from "@/components/InlineTableEditor";
+import SegmentedEditor from "@/components/SegmentedEditor";
 import { type Match, findAllMatches } from "@/lib/search-utils";
 import { detectTableAtCursor, addTableRow, addTableColumn, formatTable } from "@/lib/table-utils";
 
@@ -179,7 +179,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [matches, setMatches] = useState<Match[]>([]);
 
   // 表格编辑器相关状态
-  const [isTableEditorOpen, setIsTableEditorOpen] = useState(false);
+  // SegmentedEditor 已内置表格编辑功能，不再需要 TableEditor 对话框状态
 
   // 多选与拖拽
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -424,40 +424,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
   }, [currentNote, userId]);
 
-  // 检测光标是否在表格内的状态（用于UI显示）
-  const [isInTable, setIsInTable] = useState(false);
-
-  // 监听光标位置变化，更新表格检测状态
-  useEffect(() => {
-    if (!editorRef.current || view !== 'editor') {
-      setIsInTable(false);
-      return;
-    }
-    
-    const textarea = editorRef.current;
-    const checkTable = () => {
-      if (!textarea) return;
-      const cursorPosition = textarea.selectionStart;
-      const tableInfo = detectTableAtCursor(content, cursorPosition);
-      setIsInTable(tableInfo !== null);
-    };
-    
-    // 使用定时器定期检查（避免频繁检查影响性能）
-    const interval = setInterval(checkTable, 300);
-    checkTable(); // 立即检查一次
-    
-    // 监听事件
-    textarea.addEventListener('keyup', checkTable);
-    textarea.addEventListener('click', checkTable);
-    textarea.addEventListener('input', checkTable);
-    
-    return () => {
-      clearInterval(interval);
-      textarea.removeEventListener('keyup', checkTable);
-      textarea.removeEventListener('click', checkTable);
-      textarea.removeEventListener('input', checkTable);
-    };
-  }, [content, view]);
+  // SegmentedEditor 已经自动处理表格显示，不再需要 isInTable 状态
 
   const handleContentChange = (newTitle: string, newContent: string) => { 
       const now = Date.now();
@@ -493,31 +460,30 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       autoSaveTimerRef.current = setTimeout(() => { saveNote(newTitle, newContent, isPinned, isPublished, tags); }, 1500); 
   };
 
-  // 检测 [[ 触发与查询
-  const handleEditorChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value;
-      const cursor = e.target.selectionStart ?? value.length;
-      handleContentChange(title, value);
-
-      // 在光标前寻找最近的 [[ 且尚未闭合 ]]
-      const beforeCursor = value.slice(0, cursor);
-      const start = beforeCursor.lastIndexOf("[[");
-      const endClose = beforeCursor.lastIndexOf("]]");
-
-      if (start !== -1 && (endClose === -1 || endClose < start)) {
-          const rawQuery = beforeCursor.slice(start + 2, cursor);
-          setLinkMenuOpen(true);
-          setLinkQuery(rawQuery.trim());
-          setLinkInsertStart(start);
-          setLinkCursorPos(cursor);
-          setLinkActiveIndex(0);
-      } else {
-          setLinkMenuOpen(false);
-          setLinkQuery("");
-          setLinkInsertStart(null);
-          setLinkCursorPos(null);
-      }
-  };
+  // SegmentedEditor 的内容变化处理
+  const handleSegmentedEditorChange = useCallback((newContent: string) => {
+    handleContentChange(title, newContent);
+    
+    // 检测 [[ 触发链接菜单（简化处理：只在内容变化时检测最后一个 [[）
+    // 注意：SegmentedEditor 使用多个 Textarea，无法精确获取光标位置
+    // 这里简化处理，只在内容末尾检测
+    const lastOpenBracket = newContent.lastIndexOf("[[");
+    const lastCloseBracket = newContent.lastIndexOf("]]");
+    
+    if (lastOpenBracket !== -1 && (lastCloseBracket === -1 || lastCloseBracket < lastOpenBracket)) {
+      const rawQuery = newContent.slice(lastOpenBracket + 2).trim();
+      setLinkMenuOpen(true);
+      setLinkQuery(rawQuery);
+      setLinkInsertStart(lastOpenBracket);
+      setLinkCursorPos(newContent.length);
+      setLinkActiveIndex(0);
+    } else {
+      setLinkMenuOpen(false);
+      setLinkQuery("");
+      setLinkInsertStart(null);
+      setLinkCursorPos(null);
+    }
+  }, [title, handleContentChange]);
 
   // 基于当前文件夹里的 notes 做候选（MVP）
   const linkCandidates = notes
@@ -543,117 +509,54 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setLinkQuery("");
       setLinkInsertStart(null);
       setLinkCursorPos(null);
-
-      // 将光标移到插入链接之后
-      requestAnimationFrame(() => {
-          if (editorRef.current) {
-              const pos = before.length + insertText.length;
-              editorRef.current.focus();
-              editorRef.current.setSelectionRange(pos, pos);
-          }
-      });
+      // SegmentedEditor 会自动处理光标位置，不需要手动设置
   };
 
-  // 插入表格功能
+  // 插入表格功能 - 直接创建可视化表格段
   const handleInsertTable = () => {
-    if (!editorRef.current) return;
-    
-    const textarea = editorRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const current = content;
-    const before = current.slice(0, start);
-    const after = current.slice(end);
-    
-    // 插入2x2表格的Markdown语法
-    // 光标定位到第一个单元格（第一个空格位置）
-    const tableText = `|  |  |
+    // 通过全局方法调用 SegmentedEditor 的插入表格功能
+    if ((window as any).__segmentedEditorInsertTable) {
+      (window as any).__segmentedEditorInsertTable();
+    } else {
+      // 降级方案：插入 Markdown 表格语法
+      const tableText = `|  |  |
 |--|--|
 |  |  |
 `;
-    const nextContent = before + tableText + after;
-    setContent(nextContent);
-    handleContentChange(title, nextContent);
-    
-    // 将光标定位到第一个单元格（第一个空格位置）
-    requestAnimationFrame(() => {
-      if (editorRef.current) {
-        const pos = before.length + 2; // 第一个单元格的位置（| 之后）
-        editorRef.current.focus();
-        editorRef.current.setSelectionRange(pos, pos);
-      }
-    });
+      const nextContent = content + (content ? "\n\n" : "") + tableText;
+      setContent(nextContent);
+      handleContentChange(title, nextContent);
+    }
   };
 
-  // 表格编辑辅助功能
-  const handleAddTableRow = () => {
-    if (!editorRef.current) return;
-    
-    const cursorPosition = editorRef.current.selectionStart;
-    const { newContent, newCursorPosition } = addTableRow(content, cursorPosition);
-    
-    setContent(newContent);
-    handleContentChange(title, newContent);
-    
-    requestAnimationFrame(() => {
-      if (editorRef.current) {
-        editorRef.current.focus();
-        editorRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
-      }
-    });
-  };
+  // SegmentedEditor 已内置表格编辑功能（添加/删除行列），不再需要这些辅助函数
 
-  const handleAddTableColumn = () => {
-    if (!editorRef.current) return;
-    
-    const cursorPosition = editorRef.current.selectionStart;
-    const { newContent, newCursorPosition } = addTableColumn(content, cursorPosition);
-    
-    setContent(newContent);
-    handleContentChange(title, newContent);
-    
-    requestAnimationFrame(() => {
-      if (editorRef.current) {
-        editorRef.current.focus();
-        editorRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
-      }
-    });
-  };
+  // SegmentedEditor 已经自动处理表格，不再需要检测光标位置
 
-  const handleFormatTable = () => {
-    if (!editorRef.current) return;
+  // 键盘事件处理（用于链接菜单导航）
+  // 注意：SegmentedEditor 内部处理键盘事件，这里主要用于全局快捷键
+  useEffect(() => {
+    if (!linkMenuOpen || linkCandidates.length === 0) return;
     
-    const cursorPosition = editorRef.current.selectionStart;
-    const newContent = formatTable(content, cursorPosition);
-    
-    setContent(newContent);
-    handleContentChange(title, newContent);
-  };
-
-  // 检测光标是否在表格内
-  const isCursorInTable = (): boolean => {
-    if (!editorRef.current) return false;
-    const cursorPosition = editorRef.current.selectionStart;
-    return detectTableAtCursor(content, cursorPosition) !== null;
-  };
-
-  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (!linkMenuOpen || linkCandidates.length === 0) return;
-
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setLinkActiveIndex((prev) => (prev + 1) % linkCandidates.length);
+        e.preventDefault();
+        setLinkActiveIndex((prev) => (prev + 1) % linkCandidates.length);
       } else if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setLinkActiveIndex((prev) => (prev - 1 + linkCandidates.length) % linkCandidates.length);
+        e.preventDefault();
+        setLinkActiveIndex((prev) => (prev - 1 + linkCandidates.length) % linkCandidates.length);
       } else if (e.key === "Enter") {
-          e.preventDefault();
-          const target = linkCandidates[linkActiveIndex];
-          if (target) handleInsertLink(target);
+        e.preventDefault();
+        const target = linkCandidates[linkActiveIndex];
+        if (target) handleInsertLink(target);
       } else if (e.key === "Escape") {
-          setLinkMenuOpen(false);
+        setLinkMenuOpen(false);
       }
-  };
+    };
+    
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [linkMenuOpen, linkCandidates, linkActiveIndex]);
   
   const handleDeleteCurrentNote = async () => {
     if (!currentNote) return;
@@ -888,13 +791,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const handleReplace = useCallback((newText: string, nextMatchIndex: number) => {
     setContent(newText);
     setCurrentMatchIndex(nextMatchIndex);
-    
-    // 定位到下一个匹配项（如果有）
-    if (nextMatchIndex >= 0 && editorRef.current) {
-      // 注意：nextMatchIndex 已经是基于新文本计算的，直接使用
-      // FindReplaceDialog 会处理重新查找匹配项的逻辑
-      editorRef.current.focus();
-    }
+    // SegmentedEditor 会自动处理焦点，不需要手动聚焦
   }, []);
 
   // 处理全部替换
@@ -1142,15 +1039,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       {!zenMode && (
                         <>
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入表格" onClick={handleInsertTable}><Table className="w-4 h-4 text-muted-foreground" /></Button>
-                          {/* 表格编辑辅助按钮（仅在表格内时显示） */}
-                          {isInTable && (
-                            <>
-                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="可视化编辑表格" onClick={() => setIsTableEditorOpen(true)}><Table className="w-4 h-4 text-blue-500" /></Button>
-                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="添加表格行" onClick={handleAddTableRow}><Rows className="w-4 h-4 text-muted-foreground" /></Button>
-                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="添加表格列" onClick={handleAddTableColumn}><Columns className="w-4 h-4 text-muted-foreground" /></Button>
-                              <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="格式化表格" onClick={handleFormatTable}><AlignLeft className="w-4 h-4 text-muted-foreground" /></Button>
-                            </>
-                          )}
+                          {/* SegmentedEditor 已内置表格编辑功能，不再需要额外的表格编辑按钮 */}
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
                           <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
@@ -1292,83 +1181,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <Table className="w-4 h-4" />
                                   <span>插入表格</span>
                                 </button>
-                                {/* 表格编辑辅助按钮（仅在表格内时显示） */}
-                                {isInTable && (
-                                  <>
-                                    <button
-                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        setIsTableEditorOpen(true);
-                                        setMoreMenuOpen(false);
-                                      }}
-                                      onTouchEnd={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        setIsTableEditorOpen(true);
-                                        setMoreMenuOpen(false);
-                                      }}
-                                    >
-                                      <Table className="w-4 h-4 text-blue-500" />
-                                      <span>可视化编辑表格</span>
-                                    </button>
-                                    <button
-                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleAddTableRow();
-                                        setMoreMenuOpen(false);
-                                      }}
-                                      onTouchEnd={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleAddTableRow();
-                                        setMoreMenuOpen(false);
-                                      }}
-                                    >
-                                      <Rows className="w-4 h-4" />
-                                      <span>添加表格行</span>
-                                    </button>
-                                    <button
-                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleAddTableColumn();
-                                        setMoreMenuOpen(false);
-                                      }}
-                                      onTouchEnd={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleAddTableColumn();
-                                        setMoreMenuOpen(false);
-                                      }}
-                                    >
-                                      <Columns className="w-4 h-4" />
-                                      <span>添加表格列</span>
-                                    </button>
-                                    <button
-                                      className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleFormatTable();
-                                        setMoreMenuOpen(false);
-                                      }}
-                                      onTouchEnd={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleFormatTable();
-                                        setMoreMenuOpen(false);
-                                      }}
-                                    >
-                                      <AlignLeft className="w-4 h-4" />
-                                      <span>格式化表格</span>
-                                    </button>
-                                  </>
-                                )}
+                                {/* SegmentedEditor 已内置表格编辑功能，不再需要额外的表格编辑按钮 */}
                                 <button
                                   className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
                                   onClick={(e) => {
@@ -1545,7 +1358,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       isOpen={isFindReplaceOpen}
                       onClose={() => setIsFindReplaceOpen(false)}
                       text={content}
-                      cursorPosition={editorRef.current?.selectionStart || 0}
+                      cursorPosition={0}
                       onFind={handleFind}
                       onReplace={handleReplace}
                       onReplaceAll={handleReplaceAll}
@@ -1623,59 +1436,23 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       <div className="h-20" />
                     </div>
                   ) : (
-                    <div className="relative flex-1 mt-4 min-h-0">
-                      {/* 表格编辑器对话框 */}
-                      {isTableEditorOpen && editorRef.current && (
-                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                          <div className="bg-background rounded-lg border border-border w-full max-w-4xl max-h-[90vh] overflow-auto">
-                            <TableEditor
-                              content={content}
-                              cursorPosition={editorRef.current.selectionStart}
-                              onSave={(newContent) => {
-                                setContent(newContent);
-                                handleContentChange(title, newContent);
-                                setIsTableEditorOpen(false);
-                              }}
-                              onCancel={() => setIsTableEditorOpen(false)}
-                            />
-                          </div>
-                        </div>
-                      )}
+                    <div className="relative flex-1 mt-4 min-h-0 flex flex-col">
+                      {/* SegmentedEditor 已内置表格编辑功能，不再需要 TableEditor 对话框 */}
                       
-                      {/* 内联表格编辑器（当光标在表格内时显示在 Textarea 上方） */}
-                      {isInTable && editorRef.current && (
-                        <div className="mb-4 border border-border rounded-lg p-4 bg-card/50">
-                          <div className="text-xs text-muted-foreground mb-2">
-                            📊 可视化表格编辑
-                          </div>
-                          <InlineTableEditor
-                            content={content}
-                            cursorPosition={editorRef.current.selectionStart}
-                            onUpdate={(newContent) => {
-                              setContent(newContent);
-                              handleContentChange(title, newContent);
-                              // 更新后重新聚焦到 Textarea
-                              setTimeout(() => {
-                                if (editorRef.current) {
-                                  editorRef.current.focus();
-                                }
-                              }, 0);
-                            }}
-                          />
-                        </div>
-                      )}
+                      {/* 使用 SegmentedEditor：自动将表格显示为可视化表格 */}
+                      <div className="flex-1 min-h-0 overflow-y-auto">
+                        <SegmentedEditor
+                          content={content}
+                          onChange={handleSegmentedEditorChange}
+                          placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
+                          className={cn(
+                            "w-full min-h-[200px]",
+                            zenMode ? "text-lg leading-relaxed" : "text-base sm:text-lg leading-relaxed"
+                          )}
+                          onInsertTable={handleInsertTable}
+                        />
+                      </div>
                       
-                      <Textarea
-                        ref={editorRef}
-                        value={content}
-                        onChange={handleEditorChange}
-                        onKeyDown={handleEditorKeyDown}
-                        placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
-                        className={cn(
-                          "w-full h-full min-h-[200px] resize-none border-none shadow-none px-0 focus-visible:ring-0 bg-transparent p-0 font-sans",
-                          zenMode ? "text-lg leading-relaxed" : "text-base sm:text-lg leading-relaxed"
-                        )}
-                      />
                       {linkMenuOpen && linkCandidates.length > 0 && (
                         <div className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-lg border border-border bg-popover shadow-lg z-10">
                           <div className="px-3 py-2 border-b border-border/60 text-xs text-muted-foreground">
@@ -1707,16 +1484,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                           </ul>
                         </div>
                       )}
+                      
+                      {/* 笔记统计信息 - 放在编辑器容器内，确保在内容下方 */}
+                      {currentNote && (
+                        <NoteStats
+                          content={content}
+                          createdAt={currentNote.created_at}
+                          updatedAt={currentNote.updated_at}
+                        />
+                      )}
                     </div>
-                  )}
-                  
-                  {/* 笔记统计信息 */}
-                  {currentNote && (
-                    <NoteStats
-                      content={content}
-                      createdAt={currentNote.created_at}
-                      updatedAt={currentNote.updated_at}
-                    />
                   )}
               </div>
           </div>
