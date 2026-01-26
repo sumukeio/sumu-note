@@ -17,7 +17,7 @@ interface DraggableMindNodeProps {
   onAddSibling?: (nodeId: string) => void;
   onIndent?: (nodeId: string) => void;
   onOutdent?: (nodeId: string) => void;
-  onDelete?: (nodeId: string) => void;
+  onDelete?: (nodeId: string, skipConfirm?: boolean) => void;
   onSelect?: (nodeId: string) => void;
   isSelected?: boolean;
   selectedNodeId?: string | null;
@@ -250,22 +250,15 @@ export default function DraggableMindNode({
       if (cursorPosition === 0 && editContent.trim() === "") {
         e.preventDefault();
         
-        // 如果节点有子节点，需要确认（因为会级联删除所有子节点）
-        if (hasChildren && node.children && node.children.length > 0) {
-          // 有子节点时，仍然需要确认
-          if (confirm("确定要删除这个节点吗？所有子节点也会被删除。")) {
-            handleSave();
-            setTimeout(() => {
-              onDelete?.(node.id);
-            }, 100);
-          }
-        } else {
-          // 没有子节点时，直接删除
-          handleSave();
-          setTimeout(() => {
-            onDelete?.(node.id);
-          }, 100);
-        }
+        // 保存当前编辑，然后删除节点
+        // 父组件会处理确认逻辑（如果有子节点会弹出确认对话框）
+        handleSave();
+        setTimeout(() => {
+          // 如果有子节点，父组件的 handleDeleteNode 会弹出确认对话框
+          // 如果没有子节点，直接删除（skipConfirm=true）
+          const shouldSkipConfirm = !hasChildren || !node.children || node.children.length === 0;
+          onDelete?.(node.id, shouldSkipConfirm);
+        }, 100);
         return;
       }
     }

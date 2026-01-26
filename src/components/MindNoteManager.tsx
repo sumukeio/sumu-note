@@ -18,7 +18,8 @@ import {
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import {
   getMindNotes,
   deleteMindNote,
@@ -288,10 +289,12 @@ export default function MindNoteManager({
   onBack,
 }: MindNoteManagerProps) {
   const router = useRouter();
+  const { toast } = useToast();
   const [view, setView] = useState<"folders" | "notes">(folderId === undefined ? "folders" : "notes");
   const [folders, setFolders] = useState<Folder[]>([]);
   const [mindNotes, setMindNotes] = useState<MindNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [notesTotal, setNotesTotal] = useState(0);
@@ -419,7 +422,11 @@ export default function MindNoteManager({
       }
     } catch (error) {
       console.error("Failed to save:", error);
-      alert("操作失败，请稍后重试");
+      toast({
+        title: "操作失败",
+        description: "操作时出错，请稍后重试",
+        variant: "destructive",
+      });
     }
   };
 
@@ -444,7 +451,11 @@ export default function MindNoteManager({
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
     const ids = Array.from(selectedIds);
     const folderIds: string[] = [];
     const noteIds: string[] = [];
@@ -457,21 +468,30 @@ export default function MindNoteManager({
       }
     });
 
-    if (confirm(`确定要删除这 ${ids.length} 个项目吗？`)) {
-      try {
-        if (folderIds.length > 0) {
-          await supabase.from("folders").delete().in("id", folderIds);
-          setFolders((prev) => prev.filter((f) => !folderIds.includes(f.id)));
-        }
-        if (noteIds.length > 0) {
-          await Promise.all(noteIds.map((id) => deleteMindNote(id)));
-          setMindNotes((prev) => prev.filter((n) => !noteIds.includes(n.id)));
-        }
-        exitSelectionMode();
-      } catch (error) {
-        console.error("Failed to delete:", error);
-        alert("删除失败，请稍后重试");
+    try {
+      if (folderIds.length > 0) {
+        await supabase.from("folders").delete().in("id", folderIds);
+        setFolders((prev) => prev.filter((f) => !folderIds.includes(f.id)));
       }
+      if (noteIds.length > 0) {
+        await Promise.all(noteIds.map((id) => deleteMindNote(id)));
+        setMindNotes((prev) => prev.filter((n) => !noteIds.includes(n.id)));
+      }
+      toast({
+        title: "删除成功",
+        description: `${ids.length} 个项目已删除`,
+        variant: "success",
+      });
+      exitSelectionMode();
+    } catch (error) {
+      console.error("Failed to delete:", error);
+      toast({
+        title: "删除失败",
+        description: "删除时出错，请稍后重试",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteDialogOpen(false);
     }
   };
 
@@ -512,9 +532,18 @@ export default function MindNoteManager({
       fetchMindNotes();
       setIsMoveDialogOpen(false);
       exitSelectionMode();
+      toast({
+        title: "移动成功",
+        description: "项目已移动",
+        variant: "success",
+      });
     } catch (error) {
       console.error("Failed to move:", error);
-      alert("移动失败，请稍后重试");
+      toast({
+        title: "移动失败",
+        description: "移动时出错，请稍后重试",
+        variant: "destructive",
+      });
     }
   };
 
@@ -640,7 +669,11 @@ export default function MindNoteManager({
         }
       } catch (error) {
         console.error("Failed to move:", error);
-        alert("移动失败，请稍后重试");
+        toast({
+          title: "移动失败",
+          description: "移动时出错，请稍后重试",
+          variant: "destructive",
+        });
       }
     }
   };
@@ -924,6 +957,32 @@ export default function MindNoteManager({
               </Button>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 批量删除确认对话框 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除这 {selectedIds.size} 个项目吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </DndContext>

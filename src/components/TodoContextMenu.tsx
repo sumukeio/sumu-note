@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Flag, Trash2, Move, Tag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { type Todo, type TodoList, getTodoLists, updateTodo, deleteTodo, moveTodo } from "@/lib/todo-storage";
 import { getPriorityColor } from "@/lib/todo-utils";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ export default function TodoContextMenu({
   const [lists, setLists] = useState<TodoList[]>([]);
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
   const [showListMenu, setShowListMenu] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -86,16 +88,19 @@ export default function TodoContextMenu({
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm("确定要删除这个任务吗？")) {
-      return;
-    }
+  const handleDelete = () => {
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
     try {
       await deleteTodo(todo.id);
       onDelete?.();
       onClose();
+      setDeleteDialogOpen(false);
     } catch (error) {
       console.error("Failed to delete todo:", error);
+      setDeleteDialogOpen(false);
     }
   };
 
@@ -191,6 +196,32 @@ export default function TodoContextMenu({
         <Trash2 className="w-4 h-4" />
         <span>删除</span>
       </button>
+
+      {/* 删除确认对话框 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除这个任务吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

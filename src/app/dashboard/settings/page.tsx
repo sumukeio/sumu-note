@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/use-toast";
 import {
   getUserSettings,
   saveUserSettings,
@@ -17,6 +18,7 @@ import {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [user, setUser] = useState<{ id: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -70,10 +72,18 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       await saveUserSettings(user.id, settings);
-      alert("设置已保存");
+      toast({
+        title: "保存成功",
+        description: "设置已保存",
+        variant: "success",
+      });
     } catch (error) {
       console.error("Failed to save settings:", error);
-      alert("保存失败，请重试");
+      toast({
+        title: "保存失败",
+        description: "保存设置时出错，请重试",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }

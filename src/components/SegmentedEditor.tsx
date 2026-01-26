@@ -505,15 +505,34 @@ export default function SegmentedEditor({
   const handleDeleteTable = useCallback(
     (tableIndex: number) => {
       setSegments((prevSegments) => {
-        // 删除表格段，保留其他段
+        // 删除表格段
         const newSegments = prevSegments.filter((_, i) => i !== tableIndex);
+        
         // 如果删除后没有段了，至少保留一个空的文本段
         if (newSegments.length === 0) {
           pendingUpdateRef.current = "";
           return [{ type: "text", content: "", startPos: 0, endPos: 0 }];
         }
-        pendingUpdateRef.current = segmentsToMarkdown(newSegments);
-        return newSegments;
+        
+        // 合并相邻的文本段
+        const mergedSegments: Segment[] = [];
+        for (let i = 0; i < newSegments.length; i++) {
+          const current = newSegments[i];
+          const last = mergedSegments[mergedSegments.length - 1];
+          
+          // 如果当前段和上一个段都是文本段，合并它们
+          if (current.type === "text" && last && last.type === "text") {
+            mergedSegments[mergedSegments.length - 1] = {
+              ...last,
+              content: last.content + (last.content && current.content ? "\n\n" : "") + current.content,
+            };
+          } else {
+            mergedSegments.push(current);
+          }
+        }
+        
+        pendingUpdateRef.current = segmentsToMarkdown(mergedSegments);
+        return mergedSegments;
       });
     },
     [segmentsToMarkdown]
@@ -584,7 +603,7 @@ export default function SegmentedEditor({
                   e.stopPropagation();
                   handleDeleteTable(segmentIndex);
                 }}
-                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10 shadow-md hover:bg-red-600"
+                className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center z-10 shadow-md hover:bg-red-600"
                 title="删除表格"
               >
                 <Trash2 className="w-4 h-4" />
@@ -615,7 +634,7 @@ export default function SegmentedEditor({
                                   e.stopPropagation();
                                   handleDeleteTableColumn(segmentIndex, colIndex);
                                 }}
-                                className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover/col:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+                                className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-100 sm:opacity-0 sm:group-hover/col:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
                                 title="删除列"
                               >
                                 <Minus className="w-3 h-3" />
@@ -668,7 +687,7 @@ export default function SegmentedEditor({
                                   e.stopPropagation();
                                   handleDeleteTableRow(segmentIndex, rowIndex + 1);
                                 }}
-                                className="absolute -left-1 top-1/2 -translate-y-1/2 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+                                className="absolute -left-1 top-1/2 -translate-y-1/2 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
                                 title="删除行"
                               >
                                 <Minus className="w-3 h-3" />
@@ -683,7 +702,7 @@ export default function SegmentedEditor({
                               e.stopPropagation();
                               handleAddTableColumn(segmentIndex);
                             }}
-                            className="w-full h-full flex items-center justify-center hover:bg-accent rounded opacity-0 group-hover/row:opacity-100 transition-opacity"
+                            className="w-full h-full flex items-center justify-center hover:bg-accent rounded opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100 transition-opacity"
                             title="添加列"
                           >
                             <Plus className="w-4 h-4" />

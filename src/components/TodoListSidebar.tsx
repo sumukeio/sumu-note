@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Plus, Edit2, Trash2, Check, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import {
   createTodoList,
   updateTodoList,
@@ -32,10 +34,13 @@ export default function TodoListSidebar({
   onListDeleted,
   userId,
 }: TodoListSidebarProps) {
+  const { toast } = useToast();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const handleCreateList = async () => {
     setIsCreating(true);
@@ -55,9 +60,12 @@ export default function TodoListSidebar({
       setIsCreating(false);
     } catch (error) {
       console.error("Failed to create list:", error);
-      // 显示错误提示
       const errorMessage = error instanceof Error ? error.message : "创建清单失败";
-      alert(errorMessage);
+      toast({
+        title: "创建失败",
+        description: errorMessage,
+        variant: "destructive",
+      });
     }
   };
 
@@ -81,27 +89,47 @@ export default function TodoListSidebar({
       setEditingId(null);
     } catch (error) {
       console.error("Failed to update list:", error);
-      // 显示错误提示
       const errorMessage = error instanceof Error ? error.message : "更新清单失败";
-      alert(errorMessage);
+      toast({
+        title: "更新失败",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setLoading(null);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("确定要删除这个清单吗？清单中的任务不会被删除。")) {
+  const handleDelete = (id: string) => {
+    setPendingDeleteId(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) {
+      setDeleteDialogOpen(false);
       return;
     }
-
-    setLoading(id);
+    setLoading(pendingDeleteId);
     try {
-      await deleteTodoList(id);
-      onListDeleted(id);
+      await deleteTodoList(pendingDeleteId);
+      onListDeleted(pendingDeleteId);
+      toast({
+        title: "删除成功",
+        description: "清单已删除",
+        variant: "success",
+      });
     } catch (error) {
       console.error("Failed to delete list:", error);
+      toast({
+        title: "删除失败",
+        description: "删除清单时出错，请重试",
+        variant: "destructive",
+      });
     } finally {
       setLoading(null);
+      setDeleteDialogOpen(false);
+      setPendingDeleteId(null);
     }
   };
 
@@ -260,6 +288,36 @@ export default function TodoListSidebar({
           新建清单
         </Button>
       </div>
+
+      {/* 删除确认对话框 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除这个清单吗？清单中的任务不会被删除。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setPendingDeleteId(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={loading !== null}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

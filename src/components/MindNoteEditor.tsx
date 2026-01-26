@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, CheckCircle2, Plus, Minus, Undo2, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import DraggableMindNode from "./DraggableMindNode";
 import MindNodeToolbar from "./MindNodeToolbar";
 import {
@@ -72,11 +73,14 @@ export default function MindNoteEditor({
   userId,
 }: MindNoteEditorProps) {
   const router = useRouter();
+  const { toast } = useToast();
   const [mindNote, setMindNote] = useState<MindNote | null>(null);
   const [nodes, setNodes] = useState<MindNoteNodeTree[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [deleteNodeDialogOpen, setDeleteNodeDialogOpen] = useState(false);
+  const [pendingDeleteNodeId, setPendingDeleteNodeId] = useState<string | null>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const nodeUpdateTimerRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -122,7 +126,11 @@ export default function MindNoteEditor({
       setNodes(tree);
     } catch (error) {
       console.error("Failed to load mind note:", error);
-      alert("加载失败，请稍后重试");
+      toast({
+        title: "加载失败",
+        description: "加载思维笔记时出错，请稍后重试",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -772,9 +780,9 @@ export default function MindNoteEditor({
         const nodeToDelete = findNodeInTree(nodes, nodeId);
         if (nodeToDelete && nodeToDelete.children && nodeToDelete.children.length > 0) {
           // 有子节点时，需要确认
-          if (!confirm("确定要删除这个节点吗？所有子节点也会被删除。")) {
-            return;
-          }
+          setPendingDeleteNodeId(nodeId);
+          setDeleteNodeDialogOpen(true);
+          return;
         }
       }
 
@@ -810,8 +818,50 @@ export default function MindNoteEditor({
         loadData();
       }
     },
-    [nodes, loadData, recordAction]
+    [nodes, loadData, recordAction, toast]
   );
+
+  const confirmDeleteNode = useCallback(async () => {
+    if (!pendingDeleteNodeId) {
+      setDeleteNodeDialogOpen(false);
+      return;
+    }
+    const nodeId = pendingDeleteNodeId;
+    setPendingDeleteNodeId(null);
+    setDeleteNodeDialogOpen(false);
+
+    // 记录操作（在删除前记录）
+    const nodeToDelete = findNodeInTree(nodes, nodeId);
+    if (!isUndoRedoExecuting.current && nodeToDelete) {
+      recordAction([
+        {
+          type: "DELETE_NODE",
+          nodeId,
+          parentId: nodeToDelete.parent_id,
+          order: nodeToDelete.order_index,
+          content: nodeToDelete.content,
+          isExpanded: nodeToDelete.is_expanded,
+          children: nodeToDelete.children,
+        },
+      ]);
+    }
+
+    // 乐观更新：立即从 UI 中移除
+    setNodes((prevNodes) => deleteNodeFromTree(prevNodes, nodeId));
+
+    setSaveStatus("saving");
+
+    // 异步删除
+    try {
+      await deleteNode(nodeId);
+      setSaveStatus("saved");
+    } catch (error) {
+      console.error("Failed to delete node:", error);
+      setSaveStatus("error");
+      // 失败时重新加载
+      loadData();
+    }
+  }, [pendingDeleteNodeId, nodes, recordAction, loadData]);
 
   // 拖拽开始
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -862,7 +912,11 @@ export default function MindNoteEditor({
       // 检查是否拖到自己子节点下（防止循环引用）
       const draggedNodeDescendants = getAllNodeIds(draggedNode);
       if (draggedNodeDescendants.includes(targetNodeId)) {
-        alert("不能将节点移动到自己的子节点下");
+        toast({
+          title: "移动失败",
+          description: "不能将节点移动到自己的子节点下",
+          variant: "destructive",
+        });
         return;
       }
 
@@ -909,7 +963,11 @@ export default function MindNoteEditor({
       } catch (error) {
         console.error("Failed to move node:", error);
         setSaveStatus("error");
-        alert("移动节点失败，请稍后重试");
+        toast({
+          title: "移动失败",
+          description: "移动节点时出错，请稍后重试",
+          variant: "destructive",
+        });
         // 失败时重新加载
         loadData();
       }
@@ -1523,6 +1581,35 @@ export default function MindNoteEditor({
         onAddSibling={handleToolbarAddSibling}
         canOutdent={canOutdent()}
       />
+
+      {/* 删除节点确认对话框 */}
+      <Dialog open={deleteNodeDialogOpen} onOpenChange={setDeleteNodeDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除这个节点吗？所有子节点也会被删除。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteNodeDialogOpen(false);
+                setPendingDeleteNodeId(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteNode}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

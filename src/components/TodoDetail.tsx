@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import {
   updateTodo,
   deleteTodo,
@@ -47,6 +49,7 @@ export default function TodoDetail({
   onUpdate,
   onDelete,
 }: TodoDetailProps) {
+  const { toast } = useToast();
   const [title, setTitle] = useState(todo.title);
   const [description, setDescription] = useState(todo.description || "");
   const [priority, setPriority] = useState<0 | 1 | 2 | 3>(todo.priority);
@@ -78,6 +81,9 @@ export default function TodoDetail({
   const [saving, setSaving] = useState(false);
   const [reminderBeforeMinutes, setReminderBeforeMinutes] = useState(15);
   const [isReminderManuallySet, setIsReminderManuallySet] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteSubtodoDialogOpen, setDeleteSubtodoDialogOpen] = useState(false);
+  const [pendingDeleteSubtodoId, setPendingDeleteSubtodoId] = useState<string | null>(null);
   
   // 重复规则状态
   const [repeatRule, setRepeatRule] = useState<RepeatRule | null>(todo.repeat_rule);
@@ -290,25 +296,34 @@ export default function TodoDetail({
       onClose();
     } catch (error) {
       console.error("Failed to update todo:", error);
-      alert("保存失败，请重试");
+      toast({
+        title: "保存失败",
+        description: "保存任务时出错，请重试",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm("确定要删除这个任务吗？")) {
-      return;
-    }
+  const handleDelete = () => {
+    setDeleteDialogOpen(true);
+  };
 
+  const confirmDelete = async () => {
     setLoading(true);
     try {
       await deleteTodo(todo.id);
       onDelete();
       onClose();
+      setDeleteDialogOpen(false);
     } catch (error) {
       console.error("Failed to delete todo:", error);
-      alert("删除失败，请重试");
+      toast({
+        title: "删除失败",
+        description: "删除任务时出错，请重试",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -390,27 +405,47 @@ export default function TodoDetail({
       setEditingSubtodoTitle("");
     } catch (error) {
       console.error("Failed to update subtodo:", error);
-      alert("更新失败，请重试");
+      toast({
+        title: "更新失败",
+        description: "更新子任务时出错，请重试",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteSubtodo = async (subtodoId: string) => {
-    if (!confirm("确定要删除这个子任务吗？")) {
+  const handleDeleteSubtodo = (subtodoId: string) => {
+    setPendingDeleteSubtodoId(subtodoId);
+    setDeleteSubtodoDialogOpen(true);
+  };
+
+  const confirmDeleteSubtodo = async () => {
+    if (!pendingDeleteSubtodoId) {
+      setDeleteSubtodoDialogOpen(false);
       return;
     }
-
     setLoading(true);
     try {
-      await deleteTodo(subtodoId);
+      await deleteTodo(pendingDeleteSubtodoId);
       const updatedSubtodos = await getSubtodos(todo.id);
       setSubtodos(updatedSubtodos);
+      toast({
+        title: "删除成功",
+        description: "子任务已删除",
+        variant: "success",
+      });
     } catch (error) {
       console.error("Failed to delete subtodo:", error);
-      alert("删除失败，请重试");
+      toast({
+        title: "删除失败",
+        description: "删除子任务时出错，请重试",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
+      setDeleteSubtodoDialogOpen(false);
+      setPendingDeleteSubtodoId(null);
     }
   };
 
@@ -935,6 +970,63 @@ export default function TodoDetail({
           </div>
         </div>
       </div>
+
+      {/* 删除任务确认对话框 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除这个任务吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={loading}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除子任务确认对话框 */}
+      <Dialog open={deleteSubtodoDialogOpen} onOpenChange={setDeleteSubtodoDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除这个子任务吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteSubtodoDialogOpen(false);
+                setPendingDeleteSubtodoId(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteSubtodo}
+              disabled={loading}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
