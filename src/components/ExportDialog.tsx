@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import JSZip from "jszip";
@@ -31,6 +32,7 @@ interface ExportDialogProps {
 }
 
 export default function ExportDialog({ isOpen, onClose, userId }: ExportDialogProps) {
+  const { toast } = useToast();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [uncategorizedNotes, setUncategorizedNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,7 +151,11 @@ export default function ExportDialog({ isOpen, onClose, userId }: ExportDialogPr
       });
       
       // 显示错误提示
-      alert(`加载数据失败: ${errorMessage}`);
+      toast({
+        title: "加载失败",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -316,11 +322,19 @@ export default function ExportDialog({ isOpen, onClose, userId }: ExportDialogPr
       saveAs(blob, zipName);
 
       // 显示成功提示
-      alert(`成功导出 ${selectedNotes.size} 个笔记！`);
+      toast({
+        title: "导出成功",
+        description: `成功导出 ${selectedNotes.size} 个笔记！`,
+        variant: "success",
+      });
       onClose();
     } catch (error) {
       console.error("Export failed:", error);
-      alert("导出失败，请重试");
+      toast({
+        title: "导出失败",
+        description: "导出失败，请重试",
+        variant: "destructive",
+      });
     } finally {
       setExporting(false);
     }

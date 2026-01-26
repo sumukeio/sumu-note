@@ -3,6 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, X, Trash2, Minus, XCircle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { detectTableAtCursor, tableDataToMarkdown } from "@/lib/table-utils";
 
 interface SegmentedEditorProps {
@@ -35,6 +44,79 @@ export default function SegmentedEditor({
   const [segments, setSegments] = useState<Segment[]>([]);
   const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map());
   const pendingUpdateRef = useRef<string | null>(null);
+  const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
+  const [pendingLinkToken, setPendingLinkToken] = useState<string | null>(null);
+
+  const autoResizeTextarea = useCallback((el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    // 让 textarea 随内容自动增高（避免“框框很小/写很多也不变大”）
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  const extractTokenAtCursor = useCallback((text: string, cursor: number) => {
+    if (!text) return "";
+    // 分隔符：空白、括号、引号、逗号、中文标点等
+    // 注意：保留 URL 常见字符（:/?&=#.%_-）不要作为分隔符
+    const isBoundary = (ch: string) =>
+      /\s/.test(ch) ||
+      ch === "(" ||
+      ch === ")" ||
+      ch === "[" ||
+      ch === "]" ||
+      ch === "{" ||
+      ch === "}" ||
+      ch === '"' ||
+      ch === "'" ||
+      ch === "<" ||
+      ch === ">" ||
+      ch === "," ||
+      ch === "，" ||
+      ch === "。" ||
+      ch === "！" ||
+      ch === "？" ||
+      ch === "；" ||
+      ch === "：" ||
+      ch === "、";
+    let l = cursor;
+    let r = cursor;
+    while (l > 0 && !isBoundary(text[l - 1])) l--;
+    while (r < text.length && !isBoundary(text[r])) r++;
+    return text.slice(l, r);
+  }, []);
+
+  const openSmartLink = useCallback((raw: string) => {
+    const token = raw.trim();
+    if (!token) return false;
+
+    // 1) URL
+    if (/^https?:\/\/\S+$/i.test(token)) {
+      window.open(token, "_blank", "noopener,noreferrer");
+      return true;
+    }
+
+    // 2) Wiki link: [[id]] or [[id|label]]
+    const wikiMatch = token.match(/^\[\[([^\]|]+)(\|[^\]]+)?\]\]$/);
+    if (wikiMatch) {
+      const noteIdOrTitle = wikiMatch[1].trim();
+      const href = `/notes/${encodeURIComponent(noteIdOrTitle)}`;
+      window.open(href, "_blank", "noopener,noreferrer");
+      return true;
+    }
+
+    return false;
+  }, []);
+
+  const confirmAndOpenSmartLink = useCallback(
+    (raw: string) => {
+      const token = raw.trim();
+      if (!token) return false;
+      setPendingLinkToken(token);
+      setLinkConfirmOpen(true);
+      return true;
+    },
+    []
+  );
 
   // 检查一行是否是表格行（包括分隔行）
   const isTableLine = useCallback((line: string): boolean => {
@@ -294,6 +376,33 @@ export default function SegmentedEditor({
     [segmentsToMarkdown]
   );
 
+  // 在表格后面插入一个新的文本段，方便继续输入文字
+  const handleAddTextAfterTable = useCallback(
+    (tableIndex: number) => {
+      setSegments((prevSegments) => {
+        const newSegments = [...prevSegments];
+        const next = newSegments[tableIndex + 1];
+
+        // 如果后面已经有文本段了，就不重复插入，直接返回
+        if (next && next.type === "text") {
+          return prevSegments;
+        }
+
+        const textSegment: Segment = {
+          type: "text",
+          content: "",
+          startPos: 0,
+          endPos: 0,
+        };
+
+        newSegments.splice(tableIndex + 1, 0, textSegment);
+        pendingUpdateRef.current = segmentsToMarkdown(newSegments);
+        return newSegments;
+      });
+    },
+    [segmentsToMarkdown]
+  );
+
   // 表格操作
   const handleAddTableRow = useCallback(
     (tableIndex: number) => {
@@ -459,8 +568,9 @@ export default function SegmentedEditor({
   }
 
   return (
-    <div className={`space-y-4 ${className || ""}`}>
-      {segments.map((segment, segmentIndex) => {
+    <>
+      <div className={`space-y-4 ${className || ""}`}>
+        {segments.map((segment, segmentIndex) => {
         if (segment.type === "table" && segment.tableData) {
           return (
             <div
@@ -604,28 +714,95 @@ export default function SegmentedEditor({
                   </tbody>
                 </table>
               </div>
+
+              {/* 在表格后继续输入文字的按钮 */}
+              <div className="mt-2 flex justify-start">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleAddTextAfterTable(segmentIndex);
+                  }}
+                  className="inline-flex items-center px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                >
+                  在表格后继续输入文字
+                </button>
+              </div>
             </div>
           );
         }
 
-        // 文本段
-        return (
-          <Textarea
-            key={segmentIndex}
-            ref={(el) => {
-              if (el) {
-                textareaRefs.current.set(segmentIndex, el);
-              } else {
-                textareaRefs.current.delete(segmentIndex);
-              }
-            }}
-            value={segment.content}
-            onChange={(e) => updateTextSegment(segmentIndex, e.target.value)}
-            placeholder={segmentIndex === 0 ? placeholder : undefined}
-            className="min-h-[100px] font-mono text-sm"
-          />
-        );
-      })}
-    </div>
+          // 文本段
+          return (
+            <Textarea
+              key={segmentIndex}
+              ref={(el) => {
+                if (el) {
+                  textareaRefs.current.set(segmentIndex, el);
+                  autoResizeTextarea(el);
+                } else {
+                  textareaRefs.current.delete(segmentIndex);
+                }
+              }}
+              value={segment.content}
+              onChange={(e) => {
+                updateTextSegment(segmentIndex, e.target.value);
+                autoResizeTextarea(e.currentTarget);
+              }}
+              onClick={(e) => {
+                // 编辑态“智能识别链接”：单击命中链接时弹出应用内部确认弹窗
+                const cursor = e.currentTarget.selectionStart ?? 0;
+                const token = extractTokenAtCursor(e.currentTarget.value, cursor);
+                // 仅当命中“看起来像链接”的 token 时才弹窗
+                if (
+                  /^https?:\/\/\S+$/i.test(token.trim()) ||
+                  /^\[\[([^\]|]+)(\|[^\]]+)?\]\]$/.test(token.trim())
+                ) {
+                  confirmAndOpenSmartLink(token);
+                }
+              }}
+              placeholder={segmentIndex === 0 ? placeholder : undefined}
+              className="w-full min-h-[120px] resize-none overflow-hidden"
+            />
+          );
+        })}
+      </div>
+
+      {/* 应用内部的链接跳转确认弹窗 */}
+      <Dialog open={linkConfirmOpen} onOpenChange={setLinkConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>打开链接</DialogTitle>
+            <DialogDescription>
+              是否跳转在新页面打开下面的链接？
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 rounded-md bg-muted px-3 py-2 text-xs break-all">
+            {pendingLinkToken}
+          </div>
+          <DialogFooter className="mt-4 gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setLinkConfirmOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (pendingLinkToken) {
+                  openSmartLink(pendingLinkToken);
+                }
+                setLinkConfirmOpen(false);
+              }}
+            >
+              打开
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

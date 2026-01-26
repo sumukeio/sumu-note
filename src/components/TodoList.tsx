@@ -33,7 +33,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import { Input } from "@/components/ui/input";
 import {
   DndContext,
@@ -102,6 +105,7 @@ export default function TodoList({
   groupByDate = true,
   searchQuery = "",
 }: TodoListProps) {
+  const { toast } = useToast();
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -117,6 +121,7 @@ export default function TodoList({
     todo: Todo;
     position: { x: number; y: number };
   } | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // 同步外部 todos 变化
   // 注意：过滤逻辑已经在 TodoListView 中处理了，这里直接使用传入的 todos
@@ -341,7 +346,11 @@ export default function TodoList({
       onRefresh?.();
     } catch (error) {
       console.error("Failed to batch complete todos:", error);
-      alert("批量完成失败，请重试");
+      toast({
+        title: "批量完成失败",
+        description: "批量完成任务时出错，请重试。",
+        variant: "destructive",
+      });
     } finally {
       setIsBatchOperating(false);
     }
@@ -349,7 +358,13 @@ export default function TodoList({
 
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个任务吗？`)) {
+    // 打开应用内确认弹窗
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmBatchDelete = async () => {
+    if (selectedIds.size === 0) {
+      setDeleteDialogOpen(false);
       return;
     }
     setIsBatchOperating(true);
@@ -360,9 +375,14 @@ export default function TodoList({
       onRefresh?.();
     } catch (error) {
       console.error("Failed to batch delete todos:", error);
-      alert("批量删除失败，请重试");
+      toast({
+        title: "批量删除失败",
+        description: "批量删除任务时出错，请重试。",
+        variant: "destructive",
+      });
     } finally {
       setIsBatchOperating(false);
+      setDeleteDialogOpen(false);
     }
   };
 
@@ -377,7 +397,11 @@ export default function TodoList({
       onRefresh?.();
     } catch (error) {
       console.error("Failed to batch move todos:", error);
-      alert("批量移动失败，请重试");
+      toast({
+        title: "批量移动失败",
+        description: "批量移动任务时出错，请重试。",
+        variant: "destructive",
+      });
     } finally {
       setIsBatchOperating(false);
     }
@@ -406,7 +430,11 @@ export default function TodoList({
       onRefresh?.();
     } catch (error) {
       console.error("Failed to batch set tags:", error);
-      alert("批量设置标签失败，请重试");
+      toast({
+        title: "批量设置标签失败",
+        description: "批量设置标签时出错，请重试。",
+        variant: "destructive",
+      });
     } finally {
       setIsBatchOperating(false);
     }
@@ -423,7 +451,11 @@ export default function TodoList({
       onRefresh?.();
     } catch (error) {
       console.error("Failed to batch set priority:", error);
-      alert("批量设置优先级失败，请重试");
+      toast({
+        title: "批量设置优先级失败",
+        description: "批量设置优先级时出错，请重试。",
+        variant: "destructive",
+      });
     } finally {
       setIsBatchOperating(false);
     }
@@ -741,6 +773,33 @@ export default function TodoList({
           </DndContext>
         </div>
       </div>
+
+      {/* 批量删除确认弹窗 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除选中的 {selectedIds.size} 个任务吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmBatchDelete}
+              disabled={isBatchOperating}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 上下文菜单 */}
       {contextMenu && (

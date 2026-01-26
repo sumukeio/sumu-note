@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import { createNoteVersion, getNoteVersions, type NoteVersion } from "@/lib/version-history";
 import { isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes } from "@/lib/offline-storage";
 import NoteStats from "@/components/NoteStats";
@@ -51,7 +52,8 @@ function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouch
     return (
         <div ref={setNodeRef} style={style} {...listeners} {...attributes}
             className={cn(
-                "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-none", 
+                // 允许纵向滚动手势（避免滑动时被当作点击/选中）
+                "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y", 
                 isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border active:scale-95",
                 note.is_deleted && "opacity-70 grayscale border-dashed",
                 note.is_pinned && !note.is_deleted && "border-l-4 border-l-yellow-500 bg-yellow-500/5"
@@ -129,6 +131,7 @@ function DroppableDockItem({ id, icon: Icon, label, disabled, onClick, variant =
 
 // --- 主组件 ---
 export default function NoteManager({ userId, folderId, folderName, onBack }: NoteManagerProps) {
+  const { toast } = useToast();
   const [view, setView] = useState<'list' | 'editor'>('list');
   const [notes, setNotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,11 +156,37 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [cloudUpdateDialogOpen, setCloudUpdateDialogOpen] = useState(false);
   const [cloudUpdateNote, setCloudUpdateNote] = useState<any>(null);
   const [refreshConfirmDialogOpen, setRefreshConfirmDialogOpen] = useState(false); // 刷新确认对话框
+  const [deleteNoteDialogOpen, setDeleteNoteDialogOpen] = useState(false); // 删除笔记确认对话框
+  const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false); // 批量删除确认对话框
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false); // 重命名对话框
+  const [renameNoteId, setRenameNoteId] = useState<string | null>(null); // 待重命名的笔记ID
+  const [renameInput, setRenameInput] = useState(""); // 重命名输入框
+  const [deleteNoteId, setDeleteNoteId] = useState<string | null>(null); // 待删除的笔记ID
   const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳（服务器返回）
   const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
   const isSavingRef = useRef<boolean>(false); // 标记是否正在保存（用于忽略自己的更新事件）
   const lastSaveTimeRef = useRef<number>(0); // 记录最后一次保存的时间（毫秒时间戳）
   const pendingSelfUpdateRef = useRef<string | null>(null); // 记录一次自更新的 updated_at，用于首次实时事件直接忽略
+  // 记录最近一次“自己保存”的内容指纹，帮助彻底过滤单设备误报
+  const pendingSelfFingerprintRef = useRef<string | null>(null);
+  // 记录最近若干次自己保存（key: updated_at, value: fingerprint）
+  const recentSelfUpdatesRef = useRef<Map<string, string>>(new Map());
+
+  const buildNoteFingerprint = useCallback((data: {
+    title?: string | null;
+    content?: string | null;
+    tags?: string | null;
+    is_pinned?: boolean | null;
+    is_published?: boolean | null;
+  }) => {
+    const t = (data.title ?? "").trim();
+    const c = data.content ?? "";
+    const tagsStr = (data.tags ?? "").trim();
+    const pinned = data.is_pinned ? "1" : "0";
+    const published = data.is_published ? "1" : "0";
+    // 直接用拼接字符串做“指纹”（无需加密哈希，足够用于本地等值判断）
+    return `${t}\n<<<TAGS>>>\n${tagsStr}\n<<<FLAGS>>>\n${pinned}${published}\n<<<CONTENT>>>\n${c}`;
+  }, []);
   
   // 版本历史相关状态
   const [versionHistoryDialogOpen, setVersionHistoryDialogOpen] = useState(false);
@@ -186,6 +215,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const isSelectionMode = selectedIds.size > 0;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const ignoreClickRef = useRef(false);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const ignoreTapOnceRef = useRef(false);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -194,6 +225,68 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+
+  // 右侧边缘左滑返回（移动端）
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const EDGE_WIDTH = 24; // 右侧边缘判定宽度
+    const TRIGGER_DX = 70; // 触发返回的水平滑动距离
+    const MAX_DY = 40; // 允许的最大竖向偏移，避免与上下滚动冲突
+
+    let tracking = false;
+    let startX = 0;
+    let startY = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      // 仅在“右侧边缘”开始的左滑手势才处理
+      if (t.clientX < window.innerWidth - EDGE_WIDTH) return;
+      tracking = true;
+      startX = t.clientX;
+      startY = t.clientY;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tracking || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX; // 左滑为负
+      const dy = t.clientY - startY;
+      // 竖向滚动为主则不触发
+      if (Math.abs(dy) > MAX_DY) {
+        tracking = false;
+        return;
+      }
+      // 右侧边缘左滑达到阈值：触发返回
+      if (dx < -TRIGGER_DX) {
+        tracking = false;
+        // editor -> list；list -> folder list
+        if (view === "editor") {
+          setView("list");
+          fetchNotes();
+        } else {
+          onBack();
+        }
+      }
+    };
+
+    const onTouchEnd = () => {
+      tracking = false;
+    };
+
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener("touchstart", onTouchStart as any);
+      window.removeEventListener("touchmove", onTouchMove as any);
+      window.removeEventListener("touchend", onTouchEnd as any);
+      window.removeEventListener("touchcancel", onTouchEnd as any);
+    };
+  }, [view, folderId, userId]);
 
   // --- [[ 自动补全 ---
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -286,6 +379,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           setTitle(finalTitle); 
       }
 
+      // 记录本次保存的预期“自更新指纹”，用于过滤 Realtime 回调中的同内容更新
+      pendingSelfFingerprintRef.current = buildNoteFingerprint({
+        title: finalTitle,
+        content: currentContent,
+        tags: currentTags.join(","),
+        is_pinned: pinned,
+        is_published: published,
+      });
+
       const online = isOnline();
       let isNetworkError = false;
 
@@ -354,6 +456,14 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             now.toISOString();
           lastSavedTimestampRef.current = latestUpdatedAt;
           pendingSelfUpdateRef.current = latestUpdatedAt;
+          // 存储该次保存的指纹（最多保留 20 条）
+          if (pendingSelfFingerprintRef.current) {
+            recentSelfUpdatesRef.current.set(latestUpdatedAt, pendingSelfFingerprintRef.current);
+            if (recentSelfUpdatesRef.current.size > 20) {
+              const firstKey = recentSelfUpdatesRef.current.keys().next().value as string | undefined;
+              if (firstKey) recentSelfUpdatesRef.current.delete(firstKey);
+            }
+          }
           lastSaveTimeRef.current = new Date(latestUpdatedAt).getTime();
           
           // 延迟清除保存标记，确保实时订阅事件能够被正确过滤（3秒后，给实时事件更多时间）
@@ -361,6 +471,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             isSavingRef.current = false;
             // 清除 pendingSelfUpdateRef，避免后续误判
             pendingSelfUpdateRef.current = null;
+            // 清除一次性指纹
+            pendingSelfFingerprintRef.current = null;
           }, 3000);
           
           // 创建版本历史（异步，不阻塞保存流程）
@@ -560,25 +672,42 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   
   const handleDeleteCurrentNote = async () => {
     if (!currentNote) return;
+    setDeleteNoteId(currentNote.id);
+    setDeleteNoteDialogOpen(true);
+  };
+
+  const confirmDeleteCurrentNote = async () => {
+    if (!currentNote || !deleteNoteId) return;
     
-    if (confirm("确定要将这篇笔记移入回收站吗？")) {
-      // 先保存当前更改（如果有）
-      if (saveStatus === "unsaved") {
-        await saveNote(title, content, isPinned, isPublished, tags);
-      }
-      
-      // 标记为已删除
-      const { error } = await supabase
-        .from('notes')
-        .update({ is_deleted: true })
-        .eq('id', currentNote.id);
-      
-      if (!error) {
-        // 返回列表视图并刷新
-        setView("list");
-        fetchNotes();
-      }
+    // 先保存当前更改（如果有）
+    if (saveStatus === "unsaved") {
+      await saveNote(title, content, isPinned, isPublished, tags);
     }
+    
+    // 标记为已删除
+    const { error } = await supabase
+      .from('notes')
+      .update({ is_deleted: true })
+      .eq('id', deleteNoteId);
+    
+    if (!error) {
+      toast({
+        title: "已移入回收站",
+        description: "笔记已移入回收站",
+        variant: "default",
+      });
+      // 返回列表视图并刷新
+      setView("list");
+      fetchNotes();
+    } else {
+      toast({
+        title: "删除失败",
+        description: error.message || "删除笔记时出错",
+        variant: "destructive",
+      });
+    }
+    setDeleteNoteDialogOpen(false);
+    setDeleteNoteId(null);
   };
 
   const togglePin = async () => {
@@ -594,9 +723,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       if (newStatus) {
           const url = `${window.location.origin}/p/${currentNote.id}`;
           navigator.clipboard.writeText(url);
-          alert(`✅ 已发布！公开链接已复制：\n${url}`);
+          toast({
+            title: "已发布",
+            description: `公开链接已复制：${url}`,
+            variant: "success",
+          });
       } else {
-          alert("🚫 已取消发布，链接将失效。");
+          toast({
+            title: "已取消发布",
+            description: "链接已失效",
+            variant: "default",
+          });
       }
   };
 
@@ -613,9 +750,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           const markdownImage = `\n![image](${publicUrl})\n`;
           setContent(prev => prev + markdownImage);
           handleContentChange(title, content + markdownImage);
-          alert("✅ 图片上传成功");
+          toast({
+            title: "上传成功",
+            description: "图片已插入到笔记中",
+            variant: "success",
+          });
       } catch (error: any) {
-          alert("上传失败: " + error.message);
+          toast({
+            title: "上传失败",
+            description: error.message || "图片上传时出错",
+            variant: "destructive",
+          });
           setSaveStatus('error');
       } finally {
           if (fileInputRef.current) fileInputRef.current.value = '';
@@ -690,6 +835,31 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
           const updatedAt = updatedNote.updated_at;
           const updatedAtTimestamp = new Date(updatedAt).getTime();
           const currentTime = Date.now();
+
+          // 更强的“自更新过滤”：如果 payload 的内容指纹与我们最近保存的一致，直接忽略（解决单设备误报）
+          const payloadFingerprint = buildNoteFingerprint({
+            title: updatedNote.title,
+            content: updatedNote.content,
+            tags: (updatedNote as any).tags ?? null,
+            is_pinned: updatedNote.is_pinned,
+            is_published: updatedNote.is_published,
+          });
+          // 1) 优先按 updated_at 精确命中
+          const knownSelfFp = updatedAt ? recentSelfUpdatesRef.current.get(updatedAt) : undefined;
+          if (knownSelfFp && knownSelfFp === payloadFingerprint) {
+            recentSelfUpdatesRef.current.delete(updatedAt);
+            pendingSelfUpdateRef.current = null;
+            return;
+          }
+          // 2) 次选：在“正在保存/刚保存”窗口内，指纹相同也视为自更新
+          if (
+            (isSavingRef.current || (currentTime - lastSaveTimeRef.current < 8000)) &&
+            pendingSelfFingerprintRef.current &&
+            payloadFingerprint === pendingSelfFingerprintRef.current
+          ) {
+            pendingSelfUpdateRef.current = null;
+            return;
+          }
           
           // 如果是刚刚自己保存的同一条 updated_at，直接忽略一次
           if (pendingSelfUpdateRef.current && updatedAt === pendingSelfUpdateRef.current) {
@@ -967,15 +1137,190 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   // --- 交互逻辑 ---
   const toggleSelection = (id: string) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet); };
-  const handleTouchStart = (id: string) => { if (isSelectionMode) return; ignoreClickRef.current = false; timerRef.current = setTimeout(() => { const newSet = new Set(selectedIds); newSet.add(id); setSelectedIds(newSet); if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50); ignoreClickRef.current = true; }, 500); };
-  const handleTouchMove = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
-  const handleTouchEnd = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
+  const handleTouchStart = (id: string, e?: React.TouchEvent) => {
+    if (isSelectionMode) return;
+    ignoreClickRef.current = false;
+    ignoreTapOnceRef.current = false;
+    if (e?.touches?.[0]) {
+      touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    } else {
+      touchStartPosRef.current = null;
+    }
+    timerRef.current = setTimeout(() => {
+      const newSet = new Set(selectedIds);
+      newSet.add(id);
+      setSelectedIds(newSet);
+      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+      ignoreClickRef.current = true;
+    }, 500);
+  };
+
+  const handleTouchMove = (e?: React.TouchEvent) => {
+    // 只有当移动超过阈值时才取消长按选择，并且忽略本次点击（避免滑动误触）
+    const start = touchStartPosRef.current;
+    const t = e?.touches?.[0];
+    if (start && t) {
+      const dx = Math.abs(t.clientX - start.x);
+      const dy = Math.abs(t.clientY - start.y);
+      if (dx > 10 || dy > 10) {
+        ignoreTapOnceRef.current = true;
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      }
+      return;
+    }
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    touchStartPosRef.current = null;
+  };
   const exitSelectionMode = () => setSelectedIds(new Set());
-  const handleListClick = (note: any) => { if (ignoreClickRef.current) { ignoreClickRef.current = false; return; } if (isSelectionMode) { toggleSelection(note.id); } else { enterEditor(note); } };
-  const handleDelete = async () => { const ids = Array.from(selectedIds); if (showTrash) { if (confirm(`⚠️ 危险操作：\n这些笔记将被永久删除，无法找回！\n确认继续吗？`)) { const { error } = await supabase.from('notes').delete().in('id', ids); if (!error) { setNotes(prev => prev.filter(n => !selectedIds.has(n.id))); exitSelectionMode(); } } } else { const { error } = await supabase.from('notes').update({ is_deleted: true }).in('id', ids); if (!error) { setNotes(prev => prev.filter(n => !selectedIds.has(n.id))); exitSelectionMode(); } } };
-  const handleRestore = async () => { const ids = Array.from(selectedIds); const { error } = await supabase.from('notes').update({ is_deleted: false }).in('id', ids); if (!error) { setNotes(prev => prev.filter(n => !selectedIds.has(n.id))); exitSelectionMode(); alert("✅ 笔记已还原"); } }
-  const handleCopy = () => { if (selectedIds.size > 1) return; const note = notes.find(n => n.id === Array.from(selectedIds)[0]); if (note) { navigator.clipboard.writeText(note.content || ""); alert("✅ 已复制"); exitSelectionMode(); } };
-  const handleRename = async () => { if (selectedIds.size !== 1) return; const id = Array.from(selectedIds)[0]; const note = notes.find(n => n.id === id); if (!note) return; const newTitle = prompt("重命名笔记标题：", note.title); if (!newTitle || newTitle === note.title) return; const { error } = await supabase.from('notes').update({ title: newTitle }).eq('id', id); if (!error) { fetchNotes(); exitSelectionMode(); } };
+  const handleListClick = (note: any) => {
+    // 滑动后的 click/tap 直接忽略一次（移动端防误触）
+    if (ignoreTapOnceRef.current) {
+      ignoreTapOnceRef.current = false;
+      return;
+    }
+    if (ignoreClickRef.current) {
+      ignoreClickRef.current = false;
+      return;
+    }
+    if (isSelectionMode) {
+      toggleSelection(note.id);
+    } else {
+      enterEditor(note);
+    }
+  };
+  const handleDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (showTrash) {
+      // 回收站：永久删除，需要确认
+      setBatchDeleteDialogOpen(true);
+    } else {
+      // 普通删除：移入回收站，直接执行
+      const { error } = await supabase.from('notes').update({ is_deleted: true }).in('id', ids);
+      if (!error) {
+        setNotes(prev => prev.filter(n => !selectedIds.has(n.id)));
+        exitSelectionMode();
+        toast({
+          title: "已移入回收站",
+          description: `${ids.length} 个笔记已移入回收站`,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "删除失败",
+          description: error.message || "删除笔记时出错",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  const confirmBatchDelete = async () => {
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from('notes').delete().in('id', ids);
+    if (!error) {
+      setNotes(prev => prev.filter(n => !selectedIds.has(n.id)));
+      exitSelectionMode();
+      toast({
+        title: "已永久删除",
+        description: `${ids.length} 个笔记已被永久删除，无法找回`,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "删除失败",
+        description: error.message || "删除笔记时出错",
+        variant: "destructive",
+      });
+    }
+    setBatchDeleteDialogOpen(false);
+  };
+
+  const handleRestore = async () => {
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from('notes').update({ is_deleted: false }).in('id', ids);
+    if (!error) {
+      setNotes(prev => prev.filter(n => !selectedIds.has(n.id)));
+      exitSelectionMode();
+      toast({
+        title: "已还原",
+        description: `${ids.length} 个笔记已还原`,
+        variant: "success",
+      });
+    } else {
+      toast({
+        title: "还原失败",
+        description: error.message || "还原笔记时出错",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCopy = () => {
+    if (selectedIds.size > 1) return;
+    const note = notes.find(n => n.id === Array.from(selectedIds)[0]);
+    if (note) {
+      navigator.clipboard.writeText(note.content || "");
+      toast({
+        title: "已复制",
+        description: "笔记内容已复制到剪贴板",
+        variant: "success",
+      });
+      exitSelectionMode();
+    }
+  };
+  const handleRename = () => {
+    if (selectedIds.size !== 1) return;
+    const id = Array.from(selectedIds)[0];
+    const note = notes.find(n => n.id === id);
+    if (!note) return;
+    setRenameNoteId(id);
+    setRenameInput(note.title || "");
+    setRenameDialogOpen(true);
+  };
+
+  const confirmRename = async () => {
+    if (!renameNoteId || !renameInput.trim()) {
+      setRenameDialogOpen(false);
+      return;
+    }
+    const note = notes.find(n => n.id === renameNoteId);
+    if (!note || renameInput.trim() === note.title) {
+      setRenameDialogOpen(false);
+      return;
+    }
+    const { error } = await supabase.from('notes').update({ title: renameInput.trim() }).eq('id', renameNoteId);
+    if (!error) {
+      toast({
+        title: "重命名成功",
+        description: "笔记标题已更新",
+        variant: "success",
+      });
+      fetchNotes();
+      exitSelectionMode();
+    } else {
+      toast({
+        title: "重命名失败",
+        description: error.message || "更新笔记标题时出错",
+        variant: "destructive",
+      });
+    }
+    setRenameDialogOpen(false);
+    setRenameNoteId(null);
+    setRenameInput("");
+  };
   
   // 🔥 批量置顶逻辑
   const handlePin = async () => {
@@ -1684,6 +2029,35 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* 删除笔记确认对话框 */}
+          <Dialog open={deleteNoteDialogOpen} onOpenChange={setDeleteNoteDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>移入回收站</DialogTitle>
+                <DialogDescription>
+                  确定要将这篇笔记移入回收站吗？移入回收站后仍可恢复。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDeleteNoteDialogOpen(false);
+                    setDeleteNoteId(null);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={confirmDeleteCurrentNote}
+                >
+                  移入回收站
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       );
   }
@@ -1709,7 +2083,21 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
         <div className="grid grid-cols-2 gap-3 p-4">
             {filteredNotes.length === 0 && (<div className="col-span-2 text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl flex flex-col items-center gap-2">{searchQuery ? <p>未找到相关笔记</p> : (showTrash ? <p>回收站是空的</p> : <p>这里空空如也</p>)}</div>)}
-            {filteredNotes.map((note) => (<DraggableNoteCard key={note.id} note={note} isSelected={selectedIds.has(note.id)} isSelectionMode={isSelectionMode} onClick={() => handleListClick(note)} onTouchStart={() => handleTouchStart(note.id)} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onMouseDown={() => handleTouchStart(note.id)} onMouseUp={handleTouchEnd} />))}
+            {filteredNotes.map((note) => (
+              <DraggableNoteCard
+                key={note.id}
+                note={note}
+                isSelected={selectedIds.has(note.id)}
+                isSelectionMode={isSelectionMode}
+                onClick={() => handleListClick(note)}
+                onTouchStart={(e: React.TouchEvent) => handleTouchStart(note.id, e)}
+                onTouchMove={(e: React.TouchEvent) => handleTouchMove(e)}
+                onTouchEnd={handleTouchEnd}
+                // 桌面端不使用“长按选择”（避免影响普通点击体验）
+                onMouseDown={undefined}
+                onMouseUp={undefined}
+              />
+            ))}
         </div>
 
         <div className={cn("fixed left-0 right-0 bottom-8 flex justify-center z-50 transition-all duration-300", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
@@ -1745,6 +2133,77 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             </div>
         </div>
         <DragOverlay>{activeId ? (<div className="w-40 h-24 bg-accent/90 backdrop-blur border border-blue-500 rounded-xl shadow-2xl p-4 flex flex-col justify-center items-center rotate-3"><FileText className="w-8 h-8 text-blue-500 mb-2" /><span className="text-xs font-bold">{selectedIds.size > 1 ? `已选择 ${selectedIds.size} 项` : "移动中..."}</span></div>) : null}</DragOverlay>
+
+        {/* 批量删除确认对话框（回收站） */}
+        <Dialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>⚠️ 危险操作</DialogTitle>
+              <DialogDescription>
+                这些笔记将被永久删除，无法找回！
+                <br />
+                确认继续吗？
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setBatchDeleteDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmBatchDelete}
+              >
+                确认删除
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 重命名对话框 */}
+        <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>重命名笔记</DialogTitle>
+              <DialogDescription>
+                输入新的笔记标题
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={renameInput}
+              onChange={(e) => setRenameInput(e.target.value)}
+              placeholder="笔记标题"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  confirmRename();
+                } else if (e.key === "Escape") {
+                  setRenameDialogOpen(false);
+                }
+              }}
+              autoFocus
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setRenameDialogOpen(false);
+                  setRenameNoteId(null);
+                  setRenameInput("");
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                onClick={confirmRename}
+                disabled={!renameInput.trim()}
+              >
+                确定
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         </div>
     </DndContext>
   );

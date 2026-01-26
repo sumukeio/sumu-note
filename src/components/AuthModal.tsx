@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/components/ui/use-toast";
 import { Loader2, ArrowRight } from "lucide-react";
 
 // 添加 Google 和 Apple 图标（使用 emoji 或 SVG）
@@ -34,6 +35,7 @@ interface AuthModalProps {
 
 export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: AuthModalProps) {
   const router = useRouter();
+  const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -75,7 +77,11 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
         if (error) {
             // 🔥 核心逻辑：如果用户已存在
             if (error.message.includes("already registered") || error.message.includes("User already exists")) {
-                alert("该邮箱已注册，请直接登录！");
+                toast({
+                  title: "邮箱已注册",
+                  description: "该邮箱已注册，请直接登录！",
+                  variant: "default",
+                });
                 setActiveTab("login"); // 自动切到登录
                 // 此时 email 状态还在，所以邮箱框里已经填好了
                 // 用户只需要填密码点登录即可
@@ -84,7 +90,11 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
             throw error;
         }
         
-        alert("🎉 注册成功！请检查邮箱验证链接。");
+        toast({
+          title: "注册成功",
+          description: "请检查邮箱验证链接",
+          variant: "success",
+        });
       }
     } catch (e: any) {
       setErrorMsg(e.message || "操作失败，请重试");
