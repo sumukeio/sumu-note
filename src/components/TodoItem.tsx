@@ -77,7 +77,15 @@ export default function TodoItem({
         {/* 任务内容 */}
         <div
           className="flex-1 min-w-0 cursor-pointer"
-          onClick={() => setShowDetail(true)}
+          onClick={() => {
+            // 多选模式下，点击任务内容切换选中状态，不打开详情
+            if (isSelectMode) {
+              onToggleSelect?.();
+            } else {
+              // 普通模式下，打开任务详情
+              setShowDetail(true);
+            }
+          }}
           onContextMenu={(e) => {
             e.stopPropagation();
             onContextMenu?.(e, todo);

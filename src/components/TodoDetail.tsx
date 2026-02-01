@@ -376,7 +376,7 @@ export default function TodoDetail({
       });
       const updatedSubtodos = await getSubtodos(todo.id);
       setSubtodos(updatedSubtodos);
-      onUpdate();
+      // 不调用 onUpdate()，避免父级触发 onRefresh 导致整页刷新并关闭详情
     } catch (error) {
       console.error("Failed to toggle subtodo:", error);
     } finally {

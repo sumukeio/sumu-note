@@ -134,14 +134,14 @@ export default function TodoListSidebar({
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col min-h-0">
       {/* 标题 */}
-      <div className="p-4 border-b border-border">
+      <div className="shrink-0 p-4 border-b border-border">
         <h2 className="text-sm font-semibold text-muted-foreground">清单</h2>
       </div>
 
-      {/* 清单列表 */}
-      <div className="flex-1 overflow-y-auto p-2">
+      {/* 清单列表 - 中间可滚动 */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-2">
         {/* 全部任务 */}
         <button
           onClick={() => onSelectList(null)}
@@ -276,8 +276,8 @@ export default function TodoListSidebar({
         )}
       </div>
 
-      {/* 创建清单按钮 */}
-      <div className="p-4 border-t border-border">
+      {/* 新建清单按钮 - 固定在侧边栏底部，不随列表滚动 */}
+      <div className="shrink-0 sticky bottom-0 p-4 border-t border-border bg-background z-10">
         <Button
           variant="outline"
           size="sm"

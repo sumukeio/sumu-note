@@ -36,7 +36,23 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const processedContent = processWikiLinks(content);
 
   return (
-    <div className="prose prose-sm sm:prose-base dark:prose-invert max-w-none">
+    <div 
+      className="prose prose-sm sm:prose-base dark:prose-invert max-w-none"
+      onTouchStart={(e) => {
+        // 如果触摸的是链接，阻止事件冒泡到父级（避免触发右边缘滑动返回）
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'A' || target.closest('a')) {
+          e.stopPropagation();
+        }
+      }}
+      onTouchEnd={(e) => {
+        // 如果触摸的是链接，阻止事件冒泡到父级
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'A' || target.closest('a')) {
+          e.stopPropagation();
+        }
+      }}
+    >
       <ReactMarkdown
         components={{
           // 自定义链接组件，处理内部链接跳转
@@ -49,9 +65,28 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
                   href={href}
                   onClick={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     router.push(href);
                   }}
-                  className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline cursor-pointer"
+                  onTouchStart={(e) => {
+                    // 移动端触摸开始：阻止冒泡
+                    e.stopPropagation();
+                  }}
+                  onTouchEnd={(e) => {
+                    // 移动端触摸结束：执行跳转
+                    e.preventDefault();
+                    e.stopPropagation();
+                    router.push(href);
+                  }}
+                  className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline cursor-pointer touch-manipulation"
+                  style={{ 
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'rgba(59, 130, 246, 0.2)',
+                    display: 'inline-block',
+                    padding: '4px 2px',
+                    minHeight: '32px',
+                    lineHeight: '1.5',
+                  }}
                 >
                   {children}
                 </a>
@@ -64,7 +99,24 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchEnd={(e) => {
+                  e.stopPropagation();
+                }}
+                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline touch-manipulation"
+                style={{ 
+                  touchAction: 'manipulation',
+                  WebkitTapHighlightColor: 'rgba(59, 130, 246, 0.2)',
+                  display: 'inline-block',
+                  padding: '4px 2px',
+                  minHeight: '32px',
+                  lineHeight: '1.5',
+                }}
               >
                 {children}
               </a>

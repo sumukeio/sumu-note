@@ -12,6 +12,7 @@ import {
   Tag as TagIcon,
   Flag,
   X,
+  GripVertical,
 } from "lucide-react";
 import {
   completeTodo,
@@ -59,7 +60,7 @@ import { CSS } from "@dnd-kit/utilities";
 import TodoItem from "./TodoItem";
 import TodoContextMenu from "./TodoContextMenu";
 
-// 可排序的 TodoItem 包装组件
+// 可排序的 TodoItem 包装组件（仅拖拽手柄响应拖拽，其余区域可正常触摸滚动）
 function SortableTodoItem(props: React.ComponentProps<typeof TodoItem>) {
   const {
     attributes,
@@ -77,13 +78,18 @@ function SortableTodoItem(props: React.ComponentProps<typeof TodoItem>) {
   };
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} className="flex items-stretch gap-1">
+      {/* 仅手柄区域响应拖拽，列表区域可触摸滑动 */}
       <div
         {...attributes}
         {...listeners}
-        className="cursor-move"
+        className="shrink-0 flex items-center justify-center w-8 touch-none cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
         style={{ touchAction: "none" }}
+        aria-label="拖拽排序"
       >
+        <GripVertical className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
         <TodoItem {...props} />
       </div>
     </div>
@@ -672,8 +678,11 @@ export default function TodoList({
         </div>
       )}
 
-      {/* 任务列表 */}
-      <div className="flex-1 overflow-y-auto p-2 sm:p-4">
+      {/* 任务列表 - 支持触摸滑动，移动端平滑滚动 */}
+      <div
+        className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-4 overscroll-contain"
+        style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+      >
         <div className="max-w-4xl mx-auto space-y-3 sm:space-y-4">
           {/* 多选模式切换按钮 */}
           {!isSelectMode && todos.length > 0 && (

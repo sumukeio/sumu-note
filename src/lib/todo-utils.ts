@@ -4,6 +4,8 @@ import React from "react";
 import type { Todo } from "./todo-storage";
 
 // ==================== 智能识别 ====================
+// 日期格式支持：2026.2.7、2.7、2026年2月7日、2月7日、2026-2-7、2-7、2026/2/7、2/7、
+// 以及 2026.02.07、02.07 等补零写法；相对日期（今天/明天/后天）、星期（下周一）等。
 
 export interface ParsedTaskInput {
   title: string;
@@ -97,6 +99,10 @@ function parseDateTime(
   let isToday = false;
   const now = new Date();
 
+  /** 仅日期时用本地 YYYY-MM-DD，避免 toISOString() 在 UTC+8 等时区导致“差一天” */
+  const toLocalDateOnly = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
   // 解析相对日期
   const relativeDatePatterns = [
     { pattern: /今天|今日/i, days: 0 },
@@ -112,7 +118,7 @@ function parseDateTime(
       const date = new Date(now);
       date.setDate(date.getDate() + days);
       date.setHours(0, 0, 0, 0);
-      due_date = date.toISOString();
+      due_date = toLocalDateOnly(date);
       if (days === 0) {
         isToday = true;
       }
@@ -143,7 +149,7 @@ function parseDateTime(
       }
       date.setDate(date.getDate() + daysToAdd);
       date.setHours(0, 0, 0, 0);
-      due_date = date.toISOString();
+      due_date = toLocalDateOnly(date);
       if (daysToAdd === 0) {
         isToday = true;
       }
@@ -152,13 +158,13 @@ function parseDateTime(
     }
   }
 
-  // 解析具体日期 (月/日 或 月-日 或 YYYY-MM-DD)
-  // 支持更多格式：数字和汉字形式
+  // 解析具体日期：支持年/月/日、年-月-日、年.月.日、月/日、月.日、月日等
+  // 示例：2026.2.7、2.7、2026年2月7日、2月7日、2026-2-7、2-7、2026/2/7、2/7、2026.02.07、02.07
   const datePatterns = [
-    /(\d{4})[年\-/](\d{1,2})[月\-/](\d{1,2})[日号]?/, // 2025年3月15日 或 2025-3-15
-    /(\d{1,2})[月\-/](\d{1,2})[日号]?/, // 3月15日 或 3/15
-    /(\d{4})[年\-/](\d{1,2})[月\-/](\d{1,2})/, // 2025-3-15
-    /(\d{1,2})[月\-/](\d{1,2})/, // 3/15
+    /(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})[日号]?/, // 2026年2月7日、2026-2-7、2026/2/7、2026.2.7
+    /(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})(?![.\d])/, // 2026.2.7 无日号
+    /(\d{1,2})[月\-/.](\d{1,2})(?![.\d])/, // 2.7、2-7、2/7（先匹配，避免 2.7.1 被当成 2.7）
+    /(\d{1,2})[月\-/.](\d{1,2})[日号]?/, // 2月7日、2-7、2/7、2.7
     /(一|二|三|四|五|六|七|八|九|十|十一|十二)月(\d{1,2})[日号]?/, // 三月十五日
   ];
 
@@ -202,7 +208,7 @@ function parseDateTime(
         isToday = true;
       }
       
-      due_date = date.toISOString();
+      due_date = toLocalDateOnly(date);
       cleanedTitle = cleanedTitle.replace(datePattern, "").trim();
       break;
     }
@@ -456,7 +462,7 @@ export function groupTodosByDate(todos: Todo[]): Map<string, Todo[]> {
     }
 
     const date = new Date(todo.due_date);
-    const dateKey = date.toISOString().split("T")[0]; // YYYY-MM-DD
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
     if (!groups.has(dateKey)) {
       groups.set(dateKey, []);

@@ -86,16 +86,16 @@ export default function QuickAddTodo({
   };
 
   return (
-    <div className="border-t border-border bg-background/80 backdrop-blur p-2 sm:p-4">
-      <div className="flex items-center gap-2 max-w-4xl mx-auto">
-        <div className="relative flex-1">
+    <div className="p-3 sm:p-4 max-w-4xl mx-auto">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
           <Input
             placeholder="添加任务... (支持智能识别：明天下午3点 #工作 @重要)"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={loading}
-            className="pl-8 sm:pl-10 pr-2 sm:pr-4 text-sm sm:text-base"
+            className="pl-8 sm:pl-10 pr-3 sm:pr-4 h-11 min-h-11 touch-manipulation text-base sm:text-base"
           />
           <Plus className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         </div>
@@ -103,7 +103,7 @@ export default function QuickAddTodo({
           onClick={handleSubmit}
           disabled={!input.trim() || loading}
           size="sm"
-          className="shrink-0"
+          className="shrink-0 min-h-11 min-w-11 touch-manipulation"
         >
           {loading ? (
             <Loader2 className="w-4 h-4 animate-spin" />

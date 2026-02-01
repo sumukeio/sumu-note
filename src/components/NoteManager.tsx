@@ -290,6 +290,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   // --- [[ 自动补全 ---
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const savedScrollTopRef = useRef<number>(0);
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
   const [linkQuery, setLinkQuery] = useState("");
   const [linkInsertStart, setLinkInsertStart] = useState<number | null>(null);
@@ -574,6 +576,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   // SegmentedEditor 的内容变化处理
   const handleSegmentedEditorChange = useCallback((newContent: string) => {
+    // 编辑前保存滚动位置，避免移动端编辑后页面回到顶部
+    if (editorScrollContainerRef.current) {
+      savedScrollTopRef.current = editorScrollContainerRef.current.scrollTop;
+    }
     handleContentChange(title, newContent);
     
     // 检测 [[ 触发链接菜单（简化处理：只在内容变化时检测最后一个 [[）
@@ -596,6 +602,18 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setLinkCursorPos(null);
     }
   }, [title, handleContentChange]);
+
+  // 编辑后恢复滚动位置（解决手机端编辑后自动回到顶部）
+  useEffect(() => {
+    if (view !== "editor" || !content) return;
+    const container = editorScrollContainerRef.current;
+    if (!container) return;
+    const restore = () => {
+      container.scrollTop = savedScrollTopRef.current;
+    };
+    restore();
+    requestAnimationFrame(restore);
+  }, [content, view]);
 
   // 基于当前文件夹里的 notes 做候选（MVP）
   const linkCandidates = notes
@@ -1713,6 +1731,18 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                   <Input
                     value={title}
                     onChange={(e) => handleContentChange(e.target.value, content)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        // 标题栏回车后光标进入正文区域
+                        requestAnimationFrame(() => {
+                          const firstTextarea = editorScrollContainerRef.current?.querySelector("textarea");
+                          if (firstTextarea) {
+                            (firstTextarea as HTMLTextAreaElement).focus();
+                          }
+                        });
+                      }
+                    }}
                     placeholder="无标题"
                     className={cn(
                       "border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto",
@@ -1785,7 +1815,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       {/* SegmentedEditor 已内置表格编辑功能，不再需要 TableEditor 对话框 */}
                       
                       {/* 使用 SegmentedEditor：自动将表格显示为可视化表格 */}
-                      <div className="flex-1 min-h-0 overflow-y-auto">
+                      <div
+                        ref={editorScrollContainerRef}
+                        className="flex-1 min-h-0 overflow-y-auto"
+                      >
                         <SegmentedEditor
                           content={content}
                           onChange={handleSegmentedEditorChange}
