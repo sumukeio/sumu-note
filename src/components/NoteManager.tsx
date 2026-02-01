@@ -608,11 +608,24 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     if (view !== "editor" || !content) return;
     const container = editorScrollContainerRef.current;
     if (!container) return;
+    const saved = savedScrollTopRef.current;
     const restore = () => {
-      container.scrollTop = savedScrollTopRef.current;
+      if (editorScrollContainerRef.current) {
+        editorScrollContainerRef.current.scrollTop = saved;
+      }
     };
     restore();
-    requestAnimationFrame(restore);
+    requestAnimationFrame(() => {
+      restore();
+      requestAnimationFrame(restore);
+    });
+    // 移动端键盘/布局稳定后再恢复一次，避免被重置
+    const t1 = setTimeout(restore, 50);
+    const t2 = setTimeout(restore, 200);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [content, view]);
 
   // 基于当前文件夹里的 notes 做候选（MVP）
@@ -1387,8 +1400,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         if (saveStatus === "unsaved") {
                           saveNote(title, content, isPinned, isPublished, tags);
                         }
-                        setView("list");
-                        fetchNotes();
+                        onBack();
                       }}
                     >
                       <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1" />
@@ -1818,6 +1830,18 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       <div
                         ref={editorScrollContainerRef}
                         className="flex-1 min-h-0 overflow-y-auto"
+                        onScroll={() => {
+                          if (editorScrollContainerRef.current) {
+                            savedScrollTopRef.current = editorScrollContainerRef.current.scrollTop;
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const next = e.relatedTarget as Node | null;
+                          if (next && e.currentTarget.contains(next)) return;
+                          if (editorScrollContainerRef.current) {
+                            savedScrollTopRef.current = editorScrollContainerRef.current.scrollTop;
+                          }
+                        }}
                       >
                         <SegmentedEditor
                           content={content}
@@ -2095,14 +2119,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       );
   }
 
-  // --- 列表视图 ---
+  // --- 列表视图：搜索框及以上固定，仅笔记网格滚动 ---
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="min-h-[80vh] pb-32" onClick={(e) => { if (e.target === e.currentTarget && isSelectionMode) exitSelectionMode(); }}>
-        <header className="sticky top-0 bg-background/80 backdrop-blur z-10 border-b border-border/40">
+        <div
+          className="flex flex-col h-[calc(100dvh-6rem)] max-h-[calc(100dvh-6rem)] min-h-0"
+          onClick={(e) => { if (e.target === e.currentTarget && isSelectionMode) exitSelectionMode(); }}
+        >
+        <header className="shrink-0 bg-background/80 backdrop-blur z-10 border-b border-border/40">
             <div className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2"><ArrowLeft className="w-5 h-5" /></Button>
+                    <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2 min-w-10 min-h-10 touch-manipulation"><ArrowLeft className="w-5 h-5" /></Button>
                     <h1 className="text-lg font-bold truncate max-w-[120px]">{showTrash ? "回收站" : folderName}</h1>
                     <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">{notes.length}</span>
                 </div>
@@ -2114,6 +2141,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             <div className="px-4 pb-3"><div className="relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" /><Input placeholder={showTrash ? "搜索回收站..." : "搜索笔记..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-accent/50 border-none h-9"/></div></div>
         </header>
 
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-32" style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-3 p-3 sm:p-4">
             {filteredNotes.length === 0 && (<div className="col-span-2 text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl flex flex-col items-center gap-2">{searchQuery ? <p>未找到相关笔记</p> : (showTrash ? <p>回收站是空的</p> : <p>这里空空如也</p>)}</div>)}
             {filteredNotes.map((note) => (
@@ -2131,6 +2159,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                 onMouseUp={undefined}
               />
             ))}
+        </div>
         </div>
 
         <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
