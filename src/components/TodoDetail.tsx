@@ -468,29 +468,29 @@ export default function TodoDetail({
   };
 
   return (
-    <div 
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4"
-      onMouseDown={handleMouseDown}
-      onTouchStart={handleTouchStart}
-      onDragStart={handleDragStart}
-      onClick={(e) => e.stopPropagation()}
+<div 
+        className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2 sm:p-4"
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onDragStart={handleDragStart}
+        onClick={(e) => e.stopPropagation()}
     >
       <div 
-        className="bg-background rounded-lg border border-border w-full max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-background rounded-lg border border-border w-full max-w-2xl max-h-[calc(100vh-1rem)] sm:max-h-[90vh] overflow-hidden flex flex-col"
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onDragStart={handleDragStart}
       >
         {/* 头部 */}
-        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border shrink-0">
-          <h2 className="text-base sm:text-lg font-semibold">任务详情</h2>
-          <Button variant="ghost" size="icon" onClick={onClose}>
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border shrink-0 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3">
+          <h2 className="text-base sm:text-lg font-semibold truncate pr-2">任务详情</h2>
+          <Button variant="ghost" size="icon" onClick={onClose} className="shrink-0 min-w-10 min-h-10 touch-manipulation">
             <X className="w-5 h-5" />
           </Button>
         </div>
 
         {/* 内容 */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-5 min-h-0">
           {/* 标题 */}
           <div>
             <Label>标题</Label>
@@ -498,7 +498,7 @@ export default function TodoDetail({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="任务标题"
-              className="mt-1"
+              className="mt-1 min-h-10 touch-manipulation"
             />
           </div>
 
@@ -509,15 +509,15 @@ export default function TodoDetail({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="任务描述（可选）"
-              className="mt-1 min-h-[100px]"
+              className="mt-1 min-h-[100px] touch-manipulation"
             />
           </div>
 
-          {/* 状态和优先级 */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* 状态和优先级：移动端单列，桌面端两列 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-4">
             <div>
               <Label>状态</Label>
-              <div className="mt-1 flex gap-2">
+              <div className="mt-1 flex flex-wrap gap-2">
                 {(
                   [
                     { value: "todo", label: "待办" },
@@ -531,6 +531,7 @@ export default function TodoDetail({
                     variant={status === s.value ? "default" : "outline"}
                     size="sm"
                     onClick={() => setStatus(s.value)}
+                    className="touch-manipulation min-h-9"
                   >
                     {s.label}
                   </Button>
@@ -540,17 +541,17 @@ export default function TodoDetail({
 
             <div>
               <Label>优先级</Label>
-              <div className="mt-1 flex gap-2">
+              <div className="mt-1 flex flex-wrap gap-2">
                 {[0, 1, 2, 3].map((p) => (
                   <Button
                     key={p}
                     variant={priority === p ? "default" : "outline"}
                     size="sm"
                     onClick={() => setPriority(p as 0 | 1 | 2 | 3)}
-                    className="flex items-center gap-1"
+                    className="flex items-center gap-1 touch-manipulation min-h-9"
                   >
                     <div
-                      className="w-2 h-2 rounded-full"
+                      className="w-2 h-2 rounded-full shrink-0"
                       style={{
                         backgroundColor:
                           priority === p ? getPriorityColor(p) : "transparent",
@@ -569,22 +570,22 @@ export default function TodoDetail({
             </div>
           </div>
 
-          {/* 日期时间 */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* 日期时间：移动端单列，桌面端两列 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-4">
             <div>
               <Label>截止日期</Label>
-              <div className="mt-1 flex gap-2">
+              <div className="mt-1 flex flex-col sm:flex-row gap-2">
                 <Input
                   type="date"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
-                  className="flex-1"
+                  className="flex-1 min-h-10 touch-manipulation"
                 />
                 <Input
                   type="time"
                   value={dueTime}
                   onChange={(e) => setDueTime(e.target.value)}
-                  className="w-32"
+                  className="w-full sm:w-32 min-h-10 touch-manipulation"
                 />
               </div>
             </div>
@@ -598,7 +599,7 @@ export default function TodoDetail({
                   setReminderTime(e.target.value);
                   setIsReminderManuallySet(true);
                 }}
-                className="mt-1"
+                className="mt-1 w-full min-h-10 touch-manipulation"
               />
               {!isReminderManuallySet && (
                 <p className="text-xs text-muted-foreground mt-1">
@@ -614,7 +615,7 @@ export default function TodoDetail({
             <select
               value={listId || ""}
               onChange={(e) => setListId(e.target.value || null)}
-              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm min-h-10 touch-manipulation"
             >
               <option value="">无清单</option>
               {lists.map((list) => (
@@ -655,9 +656,9 @@ export default function TodoDetail({
                   }
                 }}
                 placeholder="添加标签"
-                className="flex-1"
+                className="flex-1 min-h-10 touch-manipulation"
               />
-              <Button onClick={handleAddTag} size="sm">
+              <Button onClick={handleAddTag} size="sm" className="min-h-10 min-w-10 touch-manipulation">
                 <Plus className="w-4 h-4" />
               </Button>
             </div>
@@ -676,7 +677,7 @@ export default function TodoDetail({
                     setRepeatRule(null);
                   }
                 }}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm min-h-10 touch-manipulation"
               >
                 <option value="none">不重复</option>
                 <option value="daily">每日</option>
@@ -925,10 +926,10 @@ export default function TodoDetail({
                     }
                   }}
                   placeholder="添加子任务... (支持智能识别：明天下午3点 #工作 @重要)"
-                  className="flex-1"
+                  className="flex-1 min-h-10 touch-manipulation"
                   disabled={loading}
                 />
-                <Button onClick={handleAddSubtodo} size="sm" disabled={loading}>
+                <Button onClick={handleAddSubtodo} size="sm" disabled={loading} className="min-h-10 min-w-10 touch-manipulation">
                   {loading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
@@ -940,21 +941,22 @@ export default function TodoDetail({
           </div>
         </div>
 
-        {/* 底部操作栏 */}
-        <div className="flex items-center justify-between p-4 border-t border-border">
+        {/* 底部操作栏：移动端纵向排列并留出安全区 */}
+        <div className="flex flex-col-reverse gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 sm:gap-2 border-t border-border shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
           <Button
             variant="destructive"
             onClick={handleDelete}
             disabled={loading || saving}
+            className="w-full sm:w-auto touch-manipulation min-h-10"
           >
             <Trash2 className="w-4 h-4 mr-2" />
             删除
           </Button>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose}>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={onClose} className="flex-1 sm:flex-initial min-h-10 touch-manipulation">
               取消
             </Button>
-            <Button onClick={handleSave} disabled={saving || !title.trim()}>
+            <Button onClick={handleSave} disabled={saving || !title.trim()} className="flex-1 sm:flex-initial min-h-10 touch-manipulation">
               {saving ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

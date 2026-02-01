@@ -259,8 +259,8 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
       
       {/* 导航栏 */}
-      <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+      <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-4xl mx-auto px-3 sm:px-4 h-14 min-h-[3.5rem] sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
           <div className="flex items-center gap-3 font-bold text-lg shrink-0">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-sm">
               S
@@ -298,17 +298,17 @@ export default function DashboardPage() {
               </Link>
               {/* 手机端：图标按钮 */}
               <Link href="/dashboard/mind-notes" className="sm:hidden">
-                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="思维笔记">
+                <Button variant="ghost" size="icon" className="h-9 w-9 min-h-9 min-w-9 touch-manipulation" aria-label="思维笔记">
                   🧠
                 </Button>
               </Link>
               <Link href="/dashboard/todos" className="sm:hidden">
-                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="任务管理">
+                <Button variant="ghost" size="icon" className="h-9 w-9 min-h-9 min-w-9 touch-manipulation" aria-label="任务管理">
                   ✅
                 </Button>
               </Link>
               <Link href="/dashboard/stats" className="sm:hidden">
-                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="统计">
+                <Button variant="ghost" size="icon" className="h-9 w-9 min-h-9 min-w-9 touch-manipulation" aria-label="统计">
                   📊
                 </Button>
               </Link>
@@ -337,7 +337,7 @@ export default function DashboardPage() {
                 <Download className="w-4 h-4" />
               </Button>
               <ModeToggle />
-              <Button variant="ghost" size="icon" onClick={handleSignOut} className="h-8 w-8" title="退出登录">
+              <Button variant="ghost" size="icon" onClick={handleSignOut} className="h-9 w-9 min-h-9 min-w-9 touch-manipulation sm:h-8 sm:w-8" title="退出登录">
                 <LogOut className="w-4 h-4" />
               </Button>
             </div>

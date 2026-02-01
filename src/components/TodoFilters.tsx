@@ -233,7 +233,7 @@ export default function TodoFilters({
           <Calendar className="w-3 h-3" />
           截止日期范围
         </label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-2">
           <div>
             <Input
               type="date"
@@ -241,7 +241,7 @@ export default function TodoFilters({
               onChange={(e) =>
                 updateFilter("dueDateFrom", e.target.value || null)
               }
-              className="h-8 text-sm"
+              className="h-9 sm:h-8 text-sm min-h-10 touch-manipulation w-full"
             />
             <label className="text-xs text-muted-foreground mt-1 block">
               开始日期
@@ -252,7 +252,7 @@ export default function TodoFilters({
               type="date"
               value={filters.dueDateTo || ""}
               onChange={(e) => updateFilter("dueDateTo", e.target.value || null)}
-              className="h-8 text-sm"
+              className="h-9 sm:h-8 text-sm min-h-10 touch-manipulation w-full"
             />
             <label className="text-xs text-muted-foreground mt-1 block">
               结束日期

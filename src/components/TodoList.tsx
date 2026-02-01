@@ -490,13 +490,13 @@ export default function TodoList({
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* 批量操作工具栏 */}
       {isSelectMode && (
-        <div className="border-b border-border bg-background/50 backdrop-blur p-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="border-b border-border bg-background/50 backdrop-blur p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Button
               variant="outline"
               size="sm"
               onClick={handleSelectAll}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 shrink-0 min-h-9 touch-manipulation"
             >
               {selectedIds.size === todos.length ? (
                 <CheckSquare className="w-4 h-4" />
@@ -507,17 +507,17 @@ export default function TodoList({
                 {selectedIds.size === todos.length ? "取消全选" : "全选"}
               </span>
             </Button>
-            <span className="text-sm text-muted-foreground">
+            <span className="text-sm text-muted-foreground truncate">
               已选择 {selectedIds.size} 个任务
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={handleBatchComplete}
               disabled={selectedIds.size === 0 || isBatchOperating}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 min-h-9 touch-manipulation"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span className="text-xs">完成</span>
@@ -528,7 +528,7 @@ export default function TodoList({
                   variant="outline"
                   size="sm"
                   disabled={selectedIds.size === 0 || isBatchOperating}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 min-h-9 touch-manipulation"
                 >
                   <Move className="w-4 h-4" />
                   <span className="text-xs">移动</span>
@@ -567,7 +567,7 @@ export default function TodoList({
                   variant="outline"
                   size="sm"
                   disabled={selectedIds.size === 0 || isBatchOperating}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 min-h-9 touch-manipulation"
                 >
                   <TagIcon className="w-4 h-4" />
                   <span className="text-xs">标签</span>
@@ -615,7 +615,7 @@ export default function TodoList({
                   variant="outline"
                   size="sm"
                   disabled={selectedIds.size === 0 || isBatchOperating}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 min-h-9 touch-manipulation"
                 >
                   <Flag className="w-4 h-4" />
                   <span className="text-xs">优先级</span>
@@ -657,7 +657,7 @@ export default function TodoList({
               size="sm"
               onClick={handleBatchDelete}
               disabled={selectedIds.size === 0 || isBatchOperating}
-              className="flex items-center gap-2 text-destructive hover:text-destructive"
+              className="flex items-center gap-2 text-destructive hover:text-destructive min-h-9 touch-manipulation"
             >
               <Trash2 className="w-4 h-4" />
               <span className="text-xs">删除</span>
@@ -669,7 +669,7 @@ export default function TodoList({
                 setIsSelectMode(false);
                 setSelectedIds(new Set());
               }}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 min-h-9 touch-manipulation"
             >
               <X className="w-4 h-4" />
               <span className="text-xs">取消</span>
@@ -691,7 +691,7 @@ export default function TodoList({
                 variant="outline"
                 size="sm"
                 onClick={() => setIsSelectMode(true)}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 min-h-9 touch-manipulation"
               >
                 <CheckSquare className="w-4 h-4" />
                 <span className="text-xs">多选</span>

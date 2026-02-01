@@ -347,12 +347,12 @@ export default function NoteDetailPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-3xl mx-auto px-4 py-6">
-        <header className="flex items-center justify-between mb-6">
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-6 pt-[calc(1.5rem+env(safe-area-inset-top))]">
+        <header className="flex items-center justify-between gap-2 mb-6 flex-wrap">
           <Button
             variant="ghost"
             size="sm"
-            className="-ml-2"
+            className="-ml-2 min-h-10 touch-manipulation shrink-0"
             onClick={handleBack}
           >
             <ArrowLeft className="w-4 h-4 mr-1" />

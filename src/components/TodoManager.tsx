@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -64,6 +65,7 @@ export default function TodoManager({ userId }: TodoManagerProps) {
   const [newTodo, setNewTodo] = useState<Todo | null>(null);
   const [mobileViewMenuOpen, setMobileViewMenuOpen] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const mobileViewMenuOpenedAtRef = useRef<number>(0);
 
   // 加载清单列表
   useEffect(() => {
@@ -185,64 +187,76 @@ export default function TodoManager({ userId }: TodoManagerProps) {
             >
               <Calendar className="w-4 h-4" />
             </Button>
-            {/* 移动端：更多视图（下拉） */}
+            {/* 移动端：更多视图（Portal 到 body，避免被父级裁剪；防抖避免同一次触摸立刻关闭） */}
             <div className="relative md:hidden">
               <Button
                 variant={mobileViewMenuOpen ? "default" : "ghost"}
                 size="icon"
-                onClick={() => setMobileViewMenuOpen((v) => !v)}
+                onClick={() => {
+                  const next = !mobileViewMenuOpen;
+                  if (next) mobileViewMenuOpenedAtRef.current = Date.now();
+                  setMobileViewMenuOpen(next);
+                }}
                 title="更多视图"
                 className="shrink-0 min-w-9 min-h-9 touch-manipulation"
               >
                 <MoreHorizontal className="w-4 h-4" />
               </Button>
-              {mobileViewMenuOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-10"
-                    onClick={() => setMobileViewMenuOpen(false)}
-                    aria-hidden
-                  />
-                  <div className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg border border-border bg-background shadow-lg min-w-[140px]">
-                    {(
-                      [
-                        { mode: "kanban" as ViewMode, label: "看板", Icon: LayoutGrid },
-                        { mode: "quadrant" as ViewMode, label: "四象限", Icon: Grid3x3 },
-                        { mode: "timeline" as ViewMode, label: "时间线", Icon: GitBranch },
-                        { mode: "gantt" as ViewMode, label: "甘特图", Icon: GanttChart },
-                        { mode: "stats" as ViewMode, label: "统计", Icon: BarChart3 },
-                      ] as const
-                    ).map(({ mode, label, Icon }) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => {
-                          setViewMode(mode);
-                          setMobileViewMenuOpen(false);
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent",
-                          viewMode === mode && "bg-accent"
-                        )}
-                      >
-                        <Icon className="w-4 h-4 shrink-0" />
-                        {label}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
+              {mobileViewMenuOpen && typeof document !== "undefined" &&
+                createPortal(
+                  <>
+                    <div
+                      className="fixed inset-0 z-[100]"
                       onClick={() => {
-                        router.push("/dashboard/settings");
+                        if (Date.now() - mobileViewMenuOpenedAtRef.current < 250) return;
                         setMobileViewMenuOpen(false);
                       }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent border-t border-border mt-1 pt-2"
+                      aria-hidden
+                    />
+                    <div
+                      className="fixed right-4 z-[101] py-2 rounded-xl border border-border bg-background shadow-xl min-w-[160px]"
+                      style={{ top: "calc(env(safe-area-inset-top) + 4rem)" }}
                     >
-                      <Settings className="w-4 h-4 shrink-0" />
-                      设置
-                    </button>
-                  </div>
-                </>
-              )}
+                      {(
+                        [
+                          { mode: "kanban" as ViewMode, label: "看板", Icon: LayoutGrid },
+                          { mode: "quadrant" as ViewMode, label: "四象限", Icon: Grid3x3 },
+                          { mode: "timeline" as ViewMode, label: "时间线", Icon: GitBranch },
+                          { mode: "gantt" as ViewMode, label: "甘特图", Icon: GanttChart },
+                          { mode: "stats" as ViewMode, label: "统计", Icon: BarChart3 },
+                        ] as const
+                      ).map(({ mode, label, Icon }) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => {
+                            setViewMode(mode);
+                            setMobileViewMenuOpen(false);
+                          }}
+                          className={cn(
+                            "w-full flex items-center gap-2 px-4 py-3 text-sm hover:bg-accent active:bg-accent touch-manipulation",
+                            viewMode === mode && "bg-accent"
+                          )}
+                        >
+                          <Icon className="w-4 h-4 shrink-0" />
+                          {label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          router.push("/dashboard/settings");
+                          setMobileViewMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-3 text-sm hover:bg-accent active:bg-accent border-t border-border mt-1 pt-3 touch-manipulation"
+                      >
+                        <Settings className="w-4 h-4 shrink-0" />
+                        设置
+                      </button>
+                    </div>
+                  </>,
+                  document.body
+                )}
             </div>
             {/* 桌面端：其余视图与设置 */}
             <div className="hidden md:flex items-center gap-1">

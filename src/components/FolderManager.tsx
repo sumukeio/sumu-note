@@ -206,7 +206,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
         </div>
       </header>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
         {folders.map((folder) => {
           const isSelected = selectedIds.has(folder.id);
           return (
@@ -219,8 +219,8 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
         })}
       </div>
 
-      <div className={cn("fixed left-0 right-0 bottom-8 flex justify-center z-50 transition-all duration-300", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
-        <div className="relative bg-background/90 backdrop-blur-md border border-border px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-8">
+      <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
+        <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
             <button onClick={(e) => { e.stopPropagation(); exitSelectionMode(); }} className="absolute -top-3 -right-3 w-6 h-6 bg-muted rounded-full flex items-center justify-center border border-border shadow-md"><X className="w-3 h-3" /></button>
             
             {/* 🔥 重命名按钮 (单选可用，多选变灰) */}
@@ -244,7 +244,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
       <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
         <DialogContent>
             <DialogHeader><DialogTitle>移动到...</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto py-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto py-4">
                 {targetFolders.map(tf => (
                     <Button key={tf.id} variant="outline" className="justify-start h-auto py-3" onClick={() => handleMoveTargetClick(tf.id)}>
                         <Folder className="w-4 h-4 mr-2 text-yellow-500" />{tf.name}

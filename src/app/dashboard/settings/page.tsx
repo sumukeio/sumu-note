@@ -103,18 +103,18 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto p-4 sm:p-6">
+      <div className="max-w-2xl mx-auto p-4 sm:p-6 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-6">
         {/* 头部 */}
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex items-center gap-3 sm:gap-4 mb-6">
           <Button
             variant="ghost"
             size="icon"
             onClick={() => router.back()}
-            className="shrink-0"
+            className="shrink-0 min-w-10 min-h-10 touch-manipulation"
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <h1 className="text-2xl font-bold">设置</h1>
+          <h1 className="text-xl sm:text-2xl font-bold truncate">设置</h1>
         </div>
 
         {/* 设置内容 */}
@@ -165,7 +165,7 @@ export default function SettingsPage() {
 
           {/* 保存按钮 */}
           <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving} className="min-h-10 touch-manipulation">
               {saving ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

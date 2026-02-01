@@ -89,11 +89,11 @@ export default function StatsPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        <header className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
-              <BarChart2 className="w-6 h-6 text-blue-500" />
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 py-6 pt-[calc(1.5rem+env(safe-area-inset-top))] space-y-6">
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold flex items-center gap-2 truncate">
+              <BarChart2 className="w-6 h-6 text-blue-500 shrink-0" />
               统计仪表盘
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
@@ -104,7 +104,7 @@ export default function StatsPage() {
             variant="ghost"
             size="sm"
             onClick={handleBack}
-            className="gap-2"
+            className="gap-2 shrink-0 min-h-10 touch-manipulation self-start sm:self-auto"
           >
             <ArrowLeft className="w-4 h-4" />
             返回笔记
