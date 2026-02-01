@@ -261,12 +261,20 @@ export default function DashboardPage() {
       {/* 导航栏 */}
       <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20 pt-[env(safe-area-inset-top)]">
         <div className="max-w-4xl mx-auto px-3 sm:px-4 h-14 min-h-[3.5rem] sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
-          <div className="flex items-center gap-3 font-bold text-lg shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setCurrentFolder(null);
+              setSearchQuery("");
+            }}
+            className="flex items-center gap-3 font-bold text-lg shrink-0 hover:opacity-90 active:opacity-80 transition-opacity touch-manipulation min-h-10 min-w-10 -ml-1 sm:min-w-0 sm:min-h-0 sm:ml-0"
+            title="返回笔记文件夹"
+          >
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white text-sm">
               S
             </div>
             <span className="hidden sm:inline">Sumu Note</span>
-          </div>
+          </button>
           <div className="flex-1 max-w-md hidden sm:flex items-center">
             <div className="relative w-full">
               <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-2.5" />

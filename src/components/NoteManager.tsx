@@ -1400,7 +1400,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         if (saveStatus === "unsaved") {
                           saveNote(title, content, isPinned, isPublished, tags);
                         }
-                        onBack();
+                        setView("list");
+                        fetchNotes();
                       }}
                     >
                       <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1" />
