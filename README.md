@@ -197,7 +197,10 @@ npm test:coverage    # 测试覆盖率
 1. 将代码推送到 GitHub
 2. 在 [Vercel](https://vercel.com) 导入项目
 3. 配置环境变量（`NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY`）
-4. 部署完成
+4. **重要**：确保 Git 提交作者在 Vercel 项目中有访问权限（团队成员）
+5. 部署完成
+
+**遇到部署权限问题？** 查看 [Vercel 部署问题解决方案](./docs/deployment/VERCEL_DEPLOYMENT_FIX.md)
 
 ### 其他平台
 
