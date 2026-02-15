@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
@@ -24,7 +24,7 @@ interface BacklinkItem {
   updated_at: string | null;
 }
 
-export default function NoteDetailPage() {
+function NoteDetailPageContent() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -550,4 +550,16 @@ export default function NoteDetailPage() {
   );
 }
 
-
+export default function NoteDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin" />
+        </div>
+      }
+    >
+      <NoteDetailPageContent />
+    </Suspense>
+  );
+}
