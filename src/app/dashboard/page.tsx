@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
@@ -51,6 +51,7 @@ function getContentSnippet(content: string, query: string, maxLength: number = 1
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
@@ -61,6 +62,8 @@ export default function DashboardPage() {
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedResultIndex, setSelectedResultIndex] = useState(-1);
+  const [initialNoteId, setInitialNoteId] = useState<string | null>(null); // 从 URL 参数获取的笔记 ID
+  const processedParamsRef = useRef<string>(""); // 记录已处理的参数组合，防止重复处理
   
   // 防抖和请求取消相关
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -96,6 +99,104 @@ export default function DashboardPage() {
     };
     checkUser();
   }, [router]);
+
+  // 检测 URL 参数，如果有 note 参数，则自动进入对应的文件夹并打开编辑模式
+  useEffect(() => {
+    if (!user?.id || loading) return;
+    
+    const noteId = searchParams.get('note');
+    const folderId = searchParams.get('folder');
+    const searchParam = searchParams.get('search');
+    
+    // 构建当前参数的唯一标识
+    const currentParams = `${noteId || ''}-${folderId || ''}-${searchParam || ''}`;
+    
+    // 如果没有 URL 参数，重置处理标志
+    if (!noteId && !searchParam) {
+      processedParamsRef.current = "";
+      return;
+    }
+    
+    // 如果已经处理过相同的参数组合，不再重复处理
+    if (processedParamsRef.current === currentParams) return;
+    
+    if (noteId) {
+      processedParamsRef.current = currentParams; // 标记为已处理
+      
+      if (folderId) {
+        // 有 folderId，获取文件夹信息
+        supabase
+          .from('folders')
+          .select('id, name')
+          .eq('id', folderId)
+          .eq('user_id', user.id)
+          .single()
+          .then(({ data, error }) => {
+            if (!error && data) {
+              setCurrentFolder({ id: data.id, name: data.name });
+              setInitialNoteId(noteId);
+              // 清除搜索查询，确保显示 NoteManager 而不是搜索结果
+              setSearchQuery("");
+              // 延迟清除 URL 参数，确保状态已更新（增加到 500ms 让状态完全设置）
+              setTimeout(() => {
+                router.replace('/dashboard', { scroll: false });
+              }, 500);
+            } else {
+              processedParamsRef.current = ""; // 失败时重置标志
+            }
+          });
+      } else {
+        // 没有 folderId，先查询笔记的 folder_id
+        supabase
+          .from('notes')
+          .select('folder_id')
+          .eq('id', noteId)
+          .eq('user_id', user.id)
+          .single()
+          .then(({ data, error }) => {
+            if (!error && data) {
+              if (data.folder_id) {
+                // 有 folder_id，获取文件夹信息
+                supabase
+                  .from('folders')
+                  .select('id, name')
+                  .eq('id', data.folder_id)
+                  .eq('user_id', user.id)
+                  .single()
+                  .then(({ data: folderData, error: folderError }) => {
+                    if (!folderError && folderData) {
+                      setCurrentFolder({ id: folderData.id, name: folderData.name });
+                      setInitialNoteId(noteId);
+                      // 清除搜索查询，确保显示 NoteManager 而不是搜索结果
+                      setSearchQuery("");
+                      // 延迟清除 URL 参数，确保状态已更新
+                      setTimeout(() => {
+                        router.replace('/dashboard', { scroll: false });
+                      }, 500);
+                    } else {
+                      processedParamsRef.current = ""; // 失败时重置标志
+                    }
+                  });
+              } else {
+                // 没有 folder_id，笔记在根目录，无法直接打开编辑（需要先进入根目录）
+                console.warn('Note has no folder_id, cannot open directly');
+                processedParamsRef.current = ""; // 失败时重置标志
+              }
+            } else {
+              processedParamsRef.current = ""; // 失败时重置标志
+            }
+          });
+      }
+    } else if (searchParam) {
+      // 只有搜索参数，设置到搜索框
+      processedParamsRef.current = currentParams;
+      setSearchQuery(searchParam);
+      // 延迟清除 URL 参数
+      setTimeout(() => {
+        router.replace('/dashboard', { scroll: false });
+      }, 300);
+    }
+  }, [user?.id, loading, searchParams, router]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -226,10 +327,12 @@ export default function DashboardPage() {
       if (e.key === "Enter" && selectedResultIndex >= 0 && selectedResultIndex < searchResults.length) {
         e.preventDefault();
         const note = searchResults[selectedResultIndex];
-        const searchParam = searchQuery.trim() 
-          ? `?search=${encodeURIComponent(searchQuery.trim())}` 
-          : '';
-        router.push(`/notes/${encodeURIComponent(note.id)}${searchParam}`);
+        // 方案A：先进入只读预览页面，高亮搜索词
+        const params = new URLSearchParams();
+        if (searchQuery.trim()) {
+          params.set('search', searchQuery.trim());
+        }
+        router.push(`/notes/${note.id}${params.toString() ? `?${params.toString()}` : ''}`);
         return;
       }
     };
@@ -385,10 +488,12 @@ export default function DashboardPage() {
                         : "border-border bg-card/60 hover:bg-accent/60"
                     )}
                     onClick={() => {
-                      const searchParam = searchQuery.trim() 
-                        ? `?search=${encodeURIComponent(searchQuery.trim())}` 
-                        : '';
-                      router.push(`/notes/${encodeURIComponent(note.id)}${searchParam}`);
+                      // 方案A：先进入只读预览页面，高亮搜索词
+                      const params = new URLSearchParams();
+                      if (searchQuery.trim()) {
+                        params.set('search', searchQuery.trim());
+                      }
+                      router.push(`/notes/${note.id}${params.toString() ? `?${params.toString()}` : ''}`);
                     }}
                     onMouseEnter={() => setSelectedResultIndex(index)}
                   >
@@ -418,7 +523,11 @@ export default function DashboardPage() {
                 userId={user.id} 
                 folderId={currentFolder.id} 
                 folderName={currentFolder.name}
-                onBack={() => setCurrentFolder(null)} // 返回到文件夹列表
+                onBack={() => {
+                  setCurrentFolder(null);
+                  setInitialNoteId(null);
+                }} // 返回到文件夹列表
+                initialNoteId={initialNoteId} // 传入初始笔记 ID，自动打开编辑模式
             />
         ) : (
             // 👀 模式 A: 查看文件夹列表 (默认)

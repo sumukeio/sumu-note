@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { detectTableAtCursor, tableDataToMarkdown } from "@/lib/table-utils";
+import FloatingToolbar from "@/components/FloatingToolbar";
 
 interface SegmentedEditorProps {
   content: string;
@@ -46,6 +47,23 @@ export default function SegmentedEditor({
   const pendingUpdateRef = useRef<string | null>(null);
   const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
   const [pendingLinkToken, setPendingLinkToken] = useState<string | null>(null);
+  
+  // 保存光标位置和滚动位置，用于移动端编辑后恢复
+  const savedCursorStateRef = useRef<{
+    segmentIndex: number;
+    cursorPosition: number;
+    scrollTop: number;
+    scrollLeft: number;
+  } | null>(null);
+  const activeTextareaIndexRef = useRef<number | null>(null);
+  const segmentsLengthRef = useRef(0); // 跟踪 segments 长度，避免无限循环
+  const hasRestoredRef = useRef(false); // 跟踪是否已恢复光标位置，避免重复恢复
+  
+  // 浮动工具栏相关状态
+  const [selectedText, setSelectedText] = useState("");
+  const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number; bottom?: number } | null>(null);
+  const [toolbarContext, setToolbarContext] = useState<'text' | 'code' | 'table'>('text');
+  const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const autoResizeTextarea = useCallback((el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -321,6 +339,60 @@ export default function SegmentedEditor({
   // 用于跟踪是否是由内部操作触发的更新（避免循环更新）
   const isInternalUpdateRef = useRef(false);
 
+  // 恢复光标位置和滚动位置（需要在 useEffect 之前定义）
+  const restoreCursorPosition = useCallback(() => {
+    const saved = savedCursorStateRef.current;
+    if (!saved) return;
+    
+    const textarea = textareaRefs.current.get(saved.segmentIndex);
+    if (!textarea) return;
+    
+    // 恢复滚动位置
+    textarea.scrollTop = saved.scrollTop;
+    textarea.scrollLeft = saved.scrollLeft;
+    
+    // 恢复光标位置
+    const restoreCursor = () => {
+      if (textarea && saved.cursorPosition <= textarea.value.length) {
+        textarea.setSelectionRange(saved.cursorPosition, saved.cursorPosition);
+        // 确保光标在可视区域内
+        const textareaRect = textarea.getBoundingClientRect();
+        const container = textarea.parentElement?.parentElement;
+        if (container) {
+          const containerRect = container.getBoundingClientRect();
+          // 如果光标不在可视区域内，滚动到光标位置
+          if (textarea.scrollTop === saved.scrollTop) {
+            // 计算光标在 textarea 中的位置
+            const textBeforeCursor = textarea.value.substring(0, saved.cursorPosition);
+            const lines = textBeforeCursor.split('\n');
+            const lineHeight = 20; // 估算行高
+            const cursorTop = (lines.length - 1) * lineHeight;
+            
+            // 如果光标在可视区域外，滚动到光标位置
+            if (cursorTop < textarea.scrollTop || cursorTop > textarea.scrollTop + textarea.clientHeight) {
+              textarea.scrollTop = Math.max(0, cursorTop - textarea.clientHeight / 2);
+            }
+          }
+        }
+      }
+    };
+    
+    // 立即尝试恢复
+    restoreCursor();
+    
+    // 使用 requestAnimationFrame 确保 DOM 已更新
+    requestAnimationFrame(() => {
+      restoreCursor();
+      requestAnimationFrame(() => {
+        restoreCursor();
+      });
+    });
+    
+    // 移动端键盘弹出后可能需要延迟恢复
+    setTimeout(restoreCursor, 50);
+    setTimeout(restoreCursor, 200);
+  }, []);
+
   // 初始化解析内容
   useEffect(() => {
     // 如果是由内部操作触发的更新，不重新解析（避免覆盖内部状态）
@@ -333,34 +405,164 @@ export default function SegmentedEditor({
   }, [content, parseContent]);
 
   // 处理待更新的内容（避免在渲染期间更新父组件）
+  // 使用独立的 effect 来处理 pendingUpdateRef，不依赖 segments
+  // 使用轮询机制定期检查 pendingUpdateRef，避免依赖 segments 导致无限循环
   useEffect(() => {
-    if (pendingUpdateRef.current !== null) {
-      const markdown = pendingUpdateRef.current;
-      pendingUpdateRef.current = null;
-      // 标记这是内部更新，避免触发重新解析
-      isInternalUpdateRef.current = true;
-      // 使用 setTimeout 确保在下一个事件循环中更新，避免在渲染期间更新父组件
+    const intervalId = setInterval(() => {
+      if (pendingUpdateRef.current !== null) {
+        const markdown = pendingUpdateRef.current;
+        pendingUpdateRef.current = null;
+        // 标记这是内部更新，避免触发重新解析
+        isInternalUpdateRef.current = true;
+        // 使用 setTimeout 确保在下一个事件循环中更新，避免在渲染期间更新父组件
+        setTimeout(() => {
+          onChange(markdown);
+          // 更新后恢复光标位置（延迟执行，避免在 onChange 中触发）
+          setTimeout(() => {
+            restoreCursorPosition();
+          }, 10);
+        }, 0);
+      }
+    }, 50); // 每 50ms 检查一次
+    
+    return () => clearInterval(intervalId);
+  }, [onChange, restoreCursorPosition]);
+  
+  // 当 segments 更新后，恢复光标位置（使用 ref 跟踪，避免无限循环）
+  useEffect(() => {
+    // 如果是由内部更新触发的，不恢复光标位置（避免循环）
+    if (isInternalUpdateRef.current) {
+      isInternalUpdateRef.current = false; // 重置标志
+      return;
+    }
+    
+    // 只在 segments 长度变化时恢复光标位置（避免内容变化时频繁恢复）
+    if (segments.length !== segmentsLengthRef.current && savedCursorStateRef.current && !hasRestoredRef.current) {
+      segmentsLengthRef.current = segments.length;
+      hasRestoredRef.current = true;
+      // 延迟恢复，确保 DOM 已更新
       const timer = setTimeout(() => {
-        onChange(markdown);
-      }, 0);
+        restoreCursorPosition();
+        hasRestoredRef.current = false;
+      }, 50);
       return () => clearTimeout(timer);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments]);
+    // 更新长度引用
+    if (segments.length !== segmentsLengthRef.current) {
+      segmentsLengthRef.current = segments.length;
+      hasRestoredRef.current = false;
+    }
+  }, [segments.length, restoreCursorPosition]);
 
   // 更新文本段
   const updateTextSegment = useCallback(
-    (index: number, newText: string) => {
+    (index: number, newContent: string, textarea: HTMLTextAreaElement) => {
+      // 保存光标位置和滚动位置
+      savedCursorStateRef.current = {
+        segmentIndex: index,
+        cursorPosition: textarea.selectionStart ?? 0,
+        scrollTop: textarea.scrollTop,
+        scrollLeft: textarea.scrollLeft,
+      };
+      activeTextareaIndexRef.current = index;
+      
       setSegments((prevSegments) => {
         const newSegments = [...prevSegments];
-        newSegments[index] = { ...newSegments[index], content: newText };
-        // 延迟更新，避免在渲染期间更新父组件
-        pendingUpdateRef.current = segmentsToMarkdown(newSegments);
+        if (newSegments[index] && newSegments[index].type === 'text') {
+          newSegments[index] = { ...newSegments[index], content: newContent };
+          // 延迟更新，避免在渲染期间更新父组件
+          pendingUpdateRef.current = segmentsToMarkdown(newSegments);
+        }
         return newSegments;
       });
     },
     [segmentsToMarkdown]
   );
+
+  // 格式化文本
+  const formatText = useCallback((segmentIndex: number, type: 'bold' | 'italic' | 'link' | 'code' | 'quote') => {
+    const textarea = textareaRefs.current.get(segmentIndex);
+    if (!textarea) return;
+    
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+    
+    if (!selectedText.trim()) {
+      // 如果没有选中文本，插入格式标记
+      let insertText = '';
+      switch (type) {
+        case 'bold':
+          insertText = '**粗体文本**';
+          break;
+        case 'italic':
+          insertText = '*斜体文本*';
+          break;
+        case 'link':
+          insertText = '[链接文本](https://example.com)';
+          break;
+        case 'code':
+          insertText = '`代码`';
+          break;
+        case 'quote':
+          insertText = '> 引用文本';
+          break;
+      }
+      
+      const newValue = 
+        textarea.value.substring(0, start) + 
+        insertText + 
+        textarea.value.substring(end);
+      
+      updateTextSegment(segmentIndex, newValue, textarea);
+      
+      // 设置光标位置
+      setTimeout(() => {
+        const newCursorPos = start + insertText.length;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        textarea.focus();
+      }, 0);
+    } else {
+      // 如果有选中文本，应用格式
+      let formattedText = '';
+      switch (type) {
+        case 'bold':
+          formattedText = `**${selectedText}**`;
+          break;
+        case 'italic':
+          formattedText = `*${selectedText}*`;
+          break;
+        case 'link':
+          formattedText = `[${selectedText}](https://example.com)`;
+          break;
+        case 'code':
+          formattedText = `\`${selectedText}\``;
+          break;
+        case 'quote':
+          formattedText = selectedText.split('\n').map(line => `> ${line}`).join('\n');
+          break;
+      }
+      
+      const newValue = 
+        textarea.value.substring(0, start) + 
+        formattedText + 
+        textarea.value.substring(end);
+      
+      updateTextSegment(segmentIndex, newValue, textarea);
+      
+      // 设置光标位置
+      setTimeout(() => {
+        const newStart = start;
+        const newEnd = start + formattedText.length;
+        textarea.setSelectionRange(newEnd, newEnd);
+        textarea.focus();
+      }, 0);
+    }
+    
+    // 关闭工具栏
+    setSelectedText("");
+    setToolbarPosition(null);
+  }, [updateTextSegment]);
 
   // 更新表格段
   const updateTableSegment = useCallback(
@@ -588,13 +790,26 @@ export default function SegmentedEditor({
 
   return (
     <>
-      <div className={`space-y-4 ${className || ""}`}>
+      <div 
+        className={className || ""}
+        style={{
+          // 内容区域优化：段落间距 1.5rem
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.5rem'
+        }}
+      >
         {segments.map((segment, segmentIndex) => {
         if (segment.type === "table" && segment.tableData) {
           return (
             <div
               key={segmentIndex}
-              className="my-4 border border-border rounded-lg p-4 bg-card relative group"
+              className="my-4 border border-border rounded-lg p-4 bg-card relative group shadow-sm hover:shadow-md transition-shadow duration-200"
+              style={{
+                // 内容区域优化：表格样式优化（圆角、阴影、悬停效果）
+                borderRadius: '0.5rem',
+                marginBottom: '1.5rem' // 段落间距
+              }}
             >
               {/* 删除表格按钮 */}
               <button
@@ -634,10 +849,10 @@ export default function SegmentedEditor({
                                   e.stopPropagation();
                                   handleDeleteTableColumn(segmentIndex, colIndex);
                                 }}
-                                className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-100 sm:opacity-0 sm:group-hover/col:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+                                className="absolute top-0 right-0 w-6 h-6 -translate-y-1/2 translate-x-1/2 bg-background border border-border hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-full opacity-0 group-hover/col:opacity-100 transition-all duration-200 flex items-center justify-center shadow-sm hover:shadow-md z-10"
                                 title="删除列"
                               >
-                                <Minus className="w-3 h-3" />
+                                <Minus className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </th>
@@ -664,7 +879,7 @@ export default function SegmentedEditor({
                         {row.map((cell, colIndex) => (
                           <td
                             key={colIndex}
-                            className="border border-border p-2 relative group/row"
+                            className="border border-border p-2 relative group/row hover:bg-accent/30 transition-colors duration-150"
                           >
                             <input
                               type="text"
@@ -687,10 +902,10 @@ export default function SegmentedEditor({
                                   e.stopPropagation();
                                   handleDeleteTableRow(segmentIndex, rowIndex + 1);
                                 }}
-                                className="absolute -left-1 top-1/2 -translate-y-1/2 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+                                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 bg-background border border-border hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-full opacity-0 group-hover/row:opacity-100 transition-all duration-200 flex items-center justify-center shadow-sm hover:shadow-md z-10"
                                 title="删除行"
                               >
-                                <Minus className="w-3 h-3" />
+                                <Minus className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </td>
@@ -766,8 +981,169 @@ export default function SegmentedEditor({
               }}
               value={segment.content}
               onChange={(e) => {
-                updateTextSegment(segmentIndex, e.target.value);
+                updateTextSegment(segmentIndex, e.target.value, e.currentTarget);
                 autoResizeTextarea(e.currentTarget);
+              }}
+              onSelect={(e) => {
+                // 保存选择位置
+                const textarea = e.currentTarget;
+                savedCursorStateRef.current = {
+                  segmentIndex,
+                  cursorPosition: textarea.selectionStart ?? 0,
+                  scrollTop: textarea.scrollTop,
+                  scrollLeft: textarea.scrollLeft,
+                };
+                activeTextareaIndexRef.current = segmentIndex;
+                
+                // 检测文本选择，显示浮动工具栏
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const selectedText = textarea.value.substring(start, end);
+                const textBeforeCursor = textarea.value.substring(0, start);
+                
+                // 智能工具栏：上下文感知 - 检测代码块或表格
+                let context: 'text' | 'code' | 'table' = 'text';
+                // 检测代码块：查找最近的 ``` 或 ` 标记
+                const codeBlockMatch = textBeforeCursor.match(/(```[\s\S]*?```|`[^`]*`)$/);
+                if (codeBlockMatch) {
+                  context = 'code';
+                }
+                // 检测表格：查找最近的 | 标记（简单检测）
+                const tableMatch = textBeforeCursor.match(/\|[\s\S]*$/);
+                if (tableMatch && !codeBlockMatch) {
+                  context = 'table';
+                }
+                
+                if (selectedText.trim() && start !== end) {
+                  // 使用更可靠的方法计算位置
+                  const textareaRect = textarea.getBoundingClientRect();
+                  
+                  // 创建一个隐藏的 div 来模拟 textarea 的布局
+                  const measureDiv = document.createElement('div');
+                  const styles = window.getComputedStyle(textarea);
+                  measureDiv.style.position = 'absolute';
+                  measureDiv.style.visibility = 'hidden';
+                  measureDiv.style.whiteSpace = 'pre-wrap';
+                  measureDiv.style.wordWrap = 'break-word';
+                  measureDiv.style.font = styles.font;
+                  measureDiv.style.fontSize = styles.fontSize;
+                  measureDiv.style.fontFamily = styles.fontFamily;
+                  measureDiv.style.lineHeight = styles.lineHeight;
+                  measureDiv.style.padding = styles.padding;
+                  measureDiv.style.width = styles.width;
+                  measureDiv.style.border = styles.border;
+                  measureDiv.style.boxSizing = styles.boxSizing;
+                  
+                  // 计算选中文本开始位置
+                  const textBeforeSelection = textarea.value.substring(0, start);
+                  measureDiv.textContent = textBeforeSelection;
+                  document.body.appendChild(measureDiv);
+                  const beforeHeight = measureDiv.offsetHeight;
+                  
+                  // 计算选中文本结束位置
+                  measureDiv.textContent = textarea.value.substring(0, end);
+                  const afterHeight = measureDiv.offsetHeight;
+                  
+                  document.body.removeChild(measureDiv);
+                  
+                  // 计算工具栏位置（确保不覆盖选中文本）
+                  const selectionTop = textareaRect.top + beforeHeight - textarea.scrollTop;
+                  const selectionBottom = textareaRect.top + afterHeight - textarea.scrollTop;
+                  const selectionCenter = (selectionTop + selectionBottom) / 2;
+                  
+                  // 水平位置：选中文本的中心位置（工具栏会在此基础上居中）
+                  // 获取选中文本的宽度（估算）
+                  const selectionWidth = Math.min(200, textareaRect.width); // 估算选中文本宽度
+                  const left = textareaRect.left + (textareaRect.width - selectionWidth) / 2;
+                  
+                  // 传递选中文本的顶部和底部位置，让 FloatingToolbar 决定显示位置
+                  setSelectedText(selectedText);
+                  setToolbarPosition({ 
+                    top: selectionTop, 
+                    left, 
+                    bottom: selectionBottom // 传递底部位置，用于判断是否覆盖
+                  });
+                  setToolbarContext(context);
+                  
+                  // 清除之前的延迟关闭
+                  if (selectionTimeoutRef.current) {
+                    clearTimeout(selectionTimeoutRef.current);
+                    selectionTimeoutRef.current = null;
+                  }
+                } else {
+                  // 清除选择（延迟关闭，避免快速切换时闪烁）
+                  if (selectionTimeoutRef.current) {
+                    clearTimeout(selectionTimeoutRef.current);
+                  }
+                  selectionTimeoutRef.current = setTimeout(() => {
+                    setSelectedText("");
+                    setToolbarPosition(null);
+                  }, 150);
+                }
+              }}
+              onPaste={(e) => {
+                // 内容辅助功能：格式化助手 - 粘贴时自动清理格式
+                e.preventDefault();
+                const pastedText = e.clipboardData.getData('text/plain');
+                const textarea = e.currentTarget;
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const currentValue = textarea.value;
+                
+                // 如果粘贴的是 HTML，尝试转换为 Markdown（简单处理）
+                const htmlData = e.clipboardData.getData('text/html');
+                let processedText = pastedText;
+                if (htmlData) {
+                  // 简单的 HTML 到 Markdown 转换
+                  processedText = htmlData
+                    .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')
+                    .replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**')
+                    .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
+                    .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')
+                    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n')
+                    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n')
+                    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n')
+                    .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n')
+                    .replace(/<br[^>]*>/gi, '\n')
+                    .replace(/<[^>]+>/g, '') // 移除其他 HTML 标签
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .trim();
+                  
+                  // 如果转换后为空，使用纯文本
+                  if (!processedText) {
+                    processedText = pastedText;
+                  }
+                }
+                
+                // 清理多余的空白行（保留最多一个空行）
+                processedText = processedText.replace(/\n{3,}/g, '\n\n');
+                
+                // 插入处理后的文本
+                const newValue = currentValue.substring(0, start) + processedText + currentValue.substring(end);
+                updateTextSegment(segmentIndex, newValue, textarea);
+                autoResizeTextarea(textarea);
+                
+                // 恢复光标位置
+                setTimeout(() => {
+                  const newCursorPos = start + processedText.length;
+                  textarea.setSelectionRange(newCursorPos, newCursorPos);
+                  textarea.focus();
+                }, 0);
+              }}
+              onFocus={(e) => {
+                // 聚焦时保存当前状态
+                const textarea = e.currentTarget;
+                savedCursorStateRef.current = {
+                  segmentIndex,
+                  cursorPosition: textarea.selectionStart ?? 0,
+                  scrollTop: textarea.scrollTop,
+                  scrollLeft: textarea.scrollLeft,
+                };
+                activeTextareaIndexRef.current = segmentIndex;
               }}
               onClick={(e) => {
                 // 编辑态“智能识别链接”：单击命中链接时弹出应用内部确认弹窗
@@ -783,10 +1159,34 @@ export default function SegmentedEditor({
               }}
               placeholder={segmentIndex === 0 ? placeholder : undefined}
               className="w-full min-h-[120px] resize-none overflow-hidden"
+              style={{
+                // 内容区域优化：行高 1.75，字间距 0.01em
+                lineHeight: '1.75',
+                letterSpacing: '0.01em',
+                // 段落间距：通过 margin-bottom 实现
+                marginBottom: '1.5rem'
+              }}
             />
           );
         })}
       </div>
+
+      {/* 浮动工具栏 */}
+      <FloatingToolbar
+        selectedText={selectedText}
+        position={toolbarPosition}
+        context={toolbarContext}
+        onFormat={(type) => {
+          if (activeTextareaIndexRef.current !== null) {
+            formatText(activeTextareaIndexRef.current, type);
+          }
+        }}
+        onClose={() => {
+          setSelectedText("");
+          setToolbarPosition(null);
+          setToolbarContext('text');
+        }}
+      />
 
       {/* 应用内部的链接跳转确认弹窗 */}
       <Dialog open={linkConfirmOpen} onOpenChange={setLinkConfirmOpen}>

@@ -35,6 +35,7 @@ interface NoteManagerProps {
   folderId: string;
   folderName: string;
   onBack: () => void;
+  initialNoteId?: string | null; // 初始要打开的笔记 ID（用于从搜索结果跳转）
 }
 
 type SaveStatus = 'saved' | 'saving' | 'error' | 'unsaved';
@@ -130,7 +131,7 @@ function DroppableDockItem({ id, icon: Icon, label, disabled, onClick, variant =
 }
 
 // --- 主组件 ---
-export default function NoteManager({ userId, folderId, folderName, onBack }: NoteManagerProps) {
+export default function NoteManager({ userId, folderId, folderName, onBack, initialNoteId }: NoteManagerProps) {
   const { toast } = useToast();
   const [view, setView] = useState<'list' | 'editor'>('list');
   const [notes, setNotes] = useState<any[]>([]);
@@ -153,9 +154,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const [isOnlineState, setIsOnlineState] = useState(true); // 网络状态
   
   // 实时同步相关状态
-  const [cloudUpdateDialogOpen, setCloudUpdateDialogOpen] = useState(false);
   const [cloudUpdateNote, setCloudUpdateNote] = useState<any>(null);
-  const [refreshConfirmDialogOpen, setRefreshConfirmDialogOpen] = useState(false); // 刷新确认对话框
   const [deleteNoteDialogOpen, setDeleteNoteDialogOpen] = useState(false); // 删除笔记确认对话框
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false); // 批量删除确认对话框
   const [renameDialogOpen, setRenameDialogOpen] = useState(false); // 重命名对话框
@@ -167,10 +166,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const isSavingRef = useRef<boolean>(false); // 标记是否正在保存（用于忽略自己的更新事件）
   const lastSaveTimeRef = useRef<number>(0); // 记录最后一次保存的时间（毫秒时间戳）
   const pendingSelfUpdateRef = useRef<string | null>(null); // 记录一次自更新的 updated_at，用于首次实时事件直接忽略
-  // 记录最近一次“自己保存”的内容指纹，帮助彻底过滤单设备误报
+  // 记录最近一次"自己保存"的内容指纹，帮助彻底过滤单设备误报
   const pendingSelfFingerprintRef = useRef<string | null>(null);
   // 记录最近若干次自己保存（key: updated_at, value: fingerprint）
   const recentSelfUpdatesRef = useRef<Map<string, string>>(new Map());
+  // 保存重试相关
+  const saveRetryCountRef = useRef<number>(0); // 当前保存重试次数
+  const saveRetryTimerRef = useRef<NodeJS.Timeout | null>(null); // 重试定时器
+  // 字数统计相关
+  const [wordStats, setWordStats] = useState({ words: 0, paragraphs: 0, readingTime: 0 }); // 字数统计
 
   const buildNoteFingerprint = useCallback((data: {
     title?: string | null;
@@ -293,6 +297,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const savedScrollTopRef = useRef<number>(0);
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
+  // 内容辅助功能：标签补全相关状态
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagInsertStart, setTagInsertStart] = useState<number | null>(null);
+  const [tagCursorPos, setTagCursorPos] = useState<number | null>(null);
+  const [tagActiveIndex, setTagActiveIndex] = useState(0);
   const [linkQuery, setLinkQuery] = useState("");
   const [linkInsertStart, setLinkInsertStart] = useState<number | null>(null);
   const [linkCursorPos, setLinkCursorPos] = useState<number | null>(null);
@@ -321,6 +331,81 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   useEffect(() => { if (userId && folderId && view === 'list') fetchNotes(); }, [userId, folderId, view, showTrash]);
 
+  // 跟踪是否已经处理过 initialNoteId，避免重复处理和无限循环
+  const processedInitialNoteIdRef = useRef<string | null>(null);
+  const isProcessingInitialNoteRef = useRef<boolean>(false);
+  
+  // 如果传入了 initialNoteId，自动打开该笔记的编辑模式
+  useEffect(() => {
+    if (!initialNoteId || !userId || !folderId) {
+      processedInitialNoteIdRef.current = null;
+      isProcessingInitialNoteRef.current = false;
+      return;
+    }
+    
+    // 如果已经处理过这个 initialNoteId，不再重复处理
+    if (processedInitialNoteIdRef.current === initialNoteId) {
+      return;
+    }
+    
+    // 如果正在处理中，避免重复执行
+    if (isProcessingInitialNoteRef.current) {
+      return;
+    }
+    
+    // 如果还在加载中，等待加载完成
+    if (loading) return;
+    
+    // 如果当前不在列表视图，先切换到列表视图（但不标记为已处理，等待下次执行）
+    if (view !== 'list') {
+      setView('list');
+      return;
+    }
+    
+    // 标记为正在处理，避免重复执行
+    isProcessingInitialNoteRef.current = true;
+    processedInitialNoteIdRef.current = initialNoteId;
+    
+    // 如果笔记列表已加载
+    if (notes.length > 0) {
+      const note = notes.find(n => n.id === initialNoteId);
+      if (note) {
+        // 找到笔记，打开编辑模式
+        enterEditor(note);
+        // 延迟重置处理标志，确保 enterEditor 完成
+        setTimeout(() => {
+          isProcessingInitialNoteRef.current = false;
+        }, 100);
+        return;
+      }
+    }
+    
+    // 如果笔记不在当前列表中，尝试从数据库加载
+    supabase
+      .from('notes')
+      .select('*')
+      .eq('id', initialNoteId)
+      .eq('user_id', userId)
+      .eq('folder_id', folderId)
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          enterEditor(data);
+          // 延迟重置处理标志，确保 enterEditor 完成
+          setTimeout(() => {
+            isProcessingInitialNoteRef.current = false;
+          }, 100);
+        } else {
+          console.warn('Failed to load note:', error);
+          // 失败时重置标志，允许重试
+          processedInitialNoteIdRef.current = null;
+          isProcessingInitialNoteRef.current = false;
+        }
+      });
+    // 移除 view 依赖，避免 enterEditor 调用 setView('editor') 时触发循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialNoteId, userId, folderId, notes.length, loading]);
+
   const filteredNotes = notes.filter(note => {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
@@ -340,6 +425,14 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setCurrentNote(note); 
       setTitle(note.title || ""); 
       setContent(note.content || ""); 
+      // 内容辅助功能：初始化字数统计
+      const contentText = note.content || "";
+      const chineseChars = (contentText.match(/[\u4e00-\u9fa5]/g) || []).length;
+      const englishWords = (contentText.match(/[a-zA-Z]+/g) || []).length;
+      const words = chineseChars + englishWords;
+      const paragraphs = contentText.split('\n').filter((line: string) => line.trim().length > 0).length;
+      const readingTime = Math.ceil(words / 200);
+      setWordStats({ words, paragraphs, readingTime });
       // 解析 tags 字段（假设为以逗号分隔的字符串）
       const rawTags = (note as any).tags as string | null | undefined;
       if (rawTags) {
@@ -365,7 +458,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
   const handleAddNote = async () => { const { data } = await supabase.from('notes').insert({ user_id: userId, folder_id: folderId, title: "", content: "" }).select().single(); if (data) enterEditor(data); };
   
-  const saveNote = useCallback(async (currentTitle: string, currentContent: string, pinned: boolean, published: boolean, currentTags: string[]) => { 
+  const saveNote = useCallback(async (currentTitle: string, currentContent: string, pinned: boolean, published: boolean, currentTags: string[], showToast: boolean = false) => { 
       if (!currentNote) return; 
       setSaveStatus('saving'); 
       const now = new Date(); 
@@ -451,6 +544,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
 
         if (!error) {
           setSaveStatus("saved");
+          // 重置重试计数（保存成功）
+          saveRetryCountRef.current = 0;
+          if (saveRetryTimerRef.current) {
+            clearTimeout(saveRetryTimerRef.current);
+            saveRetryTimerRef.current = null;
+          }
           // 记录保存时间戳，用于检测云端更新
           const latestUpdatedAt =
             (retryData?.updated_at as string | undefined) ||
@@ -467,6 +566,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             }
           }
           lastSaveTimeRef.current = new Date(latestUpdatedAt).getTime();
+          
+          // 优化：只在用户主动保存（Ctrl+S）时显示 Toast，自动保存只更新右上角状态图标
+          if (showToast) {
+            toast({
+              title: "保存成功",
+              description: "笔记已保存到云端",
+              variant: "success",
+              duration: 3000, // 3秒后自动消失
+            });
+          }
           
           // 延迟清除保存标记，确保实时订阅事件能够被正确过滤（3秒后，给实时事件更多时间）
           setTimeout(() => {
@@ -505,11 +614,46 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
             console.error("[NoteManager] 离线保存失败：", err);
             setSaveStatus("error");
             isSavingRef.current = false;
+            // 过渡动画优化：内容更新 - 保存失败 Toast 提示（震动动画）
+            toast({
+              title: "保存失败",
+              description: "无法保存到本地存储，请检查浏览器设置",
+              variant: "destructive",
+              duration: 5000, // 5秒后自动消失
+            });
           }
         } else {
           console.error("[NoteManager] 保存笔记失败：", error.message || error);
-          setSaveStatus("error");
-          isSavingRef.current = false;
+          // 编辑体验优化：保存失败自动重试（最多3次）
+          if (saveRetryCountRef.current < 3) {
+            saveRetryCountRef.current += 1;
+            // 延迟重试：第1次1秒后，第2次2秒后，第3次3秒后
+            const retryDelay = saveRetryCountRef.current * 1000;
+            if (saveRetryTimerRef.current) clearTimeout(saveRetryTimerRef.current);
+            saveRetryTimerRef.current = setTimeout(() => {
+              console.log(`[NoteManager] 自动重试保存（第 ${saveRetryCountRef.current} 次）`);
+              saveNote(currentTitle, currentContent, pinned, published, currentTags);
+            }, retryDelay);
+            setSaveStatus("saving"); // 显示为保存中，表示正在重试
+            toast({
+              title: "保存失败，正在重试",
+              description: `第 ${saveRetryCountRef.current}/3 次重试...`,
+              variant: "default",
+              duration: 2000,
+            });
+          } else {
+            // 重试次数用完，显示最终错误
+            setSaveStatus("error");
+            isSavingRef.current = false;
+            saveRetryCountRef.current = 0; // 重置重试计数
+            // 过渡动画优化：内容更新 - 保存失败 Toast 提示（震动动画）
+            toast({
+              title: "保存失败",
+              description: error.message || "保存时发生错误，已重试3次仍失败，请稍后手动保存",
+              variant: "destructive",
+              duration: 5000, // 5秒后自动消失
+            });
+          }
         }
       } else {
         // 离线模式：保存到 IndexedDB
@@ -571,7 +715,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setSaveStatus('unsaved'); 
 
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); 
-      autoSaveTimerRef.current = setTimeout(() => { saveNote(newTitle, newContent, isPinned, isPublished, tags); }, 1500); 
+      autoSaveTimerRef.current = setTimeout(() => { saveNote(newTitle, newContent, isPinned, isPublished, tags); }, 1000); // 优化：从1.5秒改为1秒 
   };
 
   // SegmentedEditor 的内容变化处理
@@ -601,6 +745,26 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setLinkInsertStart(null);
       setLinkCursorPos(null);
     }
+    
+    // 恢复容器滚动位置（移动端键盘弹出可能导致滚动位置重置）
+    const restoreScroll = () => {
+      if (editorScrollContainerRef.current && savedScrollTopRef.current !== null) {
+        editorScrollContainerRef.current.scrollTop = savedScrollTopRef.current;
+      }
+    };
+    
+    // 立即恢复
+    restoreScroll();
+    
+    // 使用 requestAnimationFrame 确保在 DOM 更新后恢复
+    requestAnimationFrame(() => {
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
+    });
+    
+    // 移动端键盘弹出后延迟恢复
+    setTimeout(restoreScroll, 50);
+    setTimeout(restoreScroll, 200);
   }, [title, handleContentChange]);
 
   // 编辑后恢复滚动位置（解决手机端编辑后自动回到顶部）
@@ -609,11 +773,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     const container = editorScrollContainerRef.current;
     if (!container) return;
     const saved = savedScrollTopRef.current;
+    
+    // 只在有保存的滚动位置时才恢复（避免初始化时滚动到顶部）
+    if (saved === null || saved === 0) return;
+    
     const restore = () => {
-      if (editorScrollContainerRef.current) {
-        editorScrollContainerRef.current.scrollTop = saved;
+      if (editorScrollContainerRef.current && savedScrollTopRef.current !== null) {
+        editorScrollContainerRef.current.scrollTop = savedScrollTopRef.current;
       }
     };
+    
     restore();
     requestAnimationFrame(() => {
       restore();
@@ -622,9 +791,11 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     // 移动端键盘/布局稳定后再恢复一次，避免被重置
     const t1 = setTimeout(restore, 50);
     const t2 = setTimeout(restore, 200);
+    const t3 = setTimeout(restore, 500); // 增加一个更长的延迟，处理键盘完全弹出后的情况
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
     };
   }, [content, view]);
 
@@ -641,8 +812,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   const handleInsertLink = (noteToLink: any) => {
       if (linkInsertStart == null || linkCursorPos == null) return;
       const current = content;
-      const before = current.slice(0, linkInsertStart);
-      const after = current.slice(linkCursorPos);
+      const before = content.slice(0, linkInsertStart);
+      const after = content.slice(linkCursorPos);
       const label = noteToLink.title || "未命名笔记";
       const insertText = `[[${noteToLink.id}|${label}]]`;
       const nextContent = before + insertText + after;
@@ -653,6 +824,40 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setLinkInsertStart(null);
       setLinkCursorPos(null);
       // SegmentedEditor 会自动处理光标位置，不需要手动设置
+  };
+
+  // 内容辅助功能：标签补全 - 获取所有已使用的标签
+  const allTags = Array.from(new Set(notes.flatMap(n => {
+    const rawTags = (n as any).tags as string | null | undefined;
+    if (rawTags) {
+      return rawTags.split(",").map(t => t.trim()).filter(Boolean);
+    }
+    return [];
+  })));
+
+  // 内容辅助功能：标签补全 - 过滤候选标签
+  const tagCandidates = allTags
+    .filter(tag => {
+      if (!tagQuery) return true;
+      return tag.toLowerCase().includes(tagQuery.toLowerCase());
+    })
+    .slice(0, 10);
+
+  // 内容辅助功能：标签补全 - 插入标签
+  const handleInsertTag = (tag: string) => {
+    if (tagInsertStart == null || tagCursorPos == null) return;
+    const current = content;
+    const before = content.slice(0, tagInsertStart);
+    const after = content.slice(tagCursorPos);
+    // 移除 # 和查询文本，插入完整的标签
+    const insertText = `#${tag} `;
+    const nextContent = before + insertText + after;
+    setContent(nextContent);
+    handleContentChange(title, nextContent);
+    setTagMenuOpen(false);
+    setTagQuery("");
+    setTagInsertStart(null);
+    setTagCursorPos(null);
   };
 
   // 插入表格功能 - 直接创建可视化表格段
@@ -798,7 +1003,20 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
   };
 
-  useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (view === 'editor') saveNote(title, content, isPinned, isPublished, tags); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, [view, title, content, isPinned, isPublished, tags, saveNote]);
+  // 优化：Ctrl+S / Cmd+S 手动保存时显示 Toast 提示
+  useEffect(() => { 
+    const handleKeyDown = (e: KeyboardEvent) => { 
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { 
+        e.preventDefault(); 
+        if (view === 'editor') {
+          // 用户主动保存：显示 Toast 提示
+          saveNote(title, content, isPinned, isPublished, tags, true); 
+        }
+      } 
+    }; 
+    window.addEventListener('keydown', handleKeyDown); 
+    return () => window.removeEventListener('keydown', handleKeyDown); 
+  }, [view, title, content, isPinned, isPublished, tags, saveNote]);
 
   // 网络状态监听和自动同步
   useEffect(() => {
@@ -929,8 +1147,9 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                 return;
               }
               
+              // 自动处理云端更新：保存本地更改到版本历史，然后加载云端版本
               setCloudUpdateNote(updatedNote);
-              setCloudUpdateDialogOpen(true);
+              handleAutoSyncFromCloud(updatedNote);
             }
           }
         }
@@ -947,13 +1166,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     };
   }, [view, currentNote]);
 
-  // 查找替换快捷键监听
+  // 快捷操作增强：键盘快捷键监听
   useEffect(() => {
     if (view !== "editor") return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modKey = isMac ? e.metaKey : e.ctrlKey;
+      
       // Ctrl+F 或 Cmd+F：打开查找
-      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+      if (modKey && e.key === "f" && !e.shiftKey) {
         e.preventDefault();
         setFindReplaceMode("find");
         setIsFindReplaceOpen(true);
@@ -961,17 +1183,150 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
 
       // Ctrl+H 或 Cmd+H：打开替换
-      if ((e.ctrlKey || e.metaKey) && e.key === "h") {
+      if (modKey && e.key === "h" && !e.shiftKey) {
         e.preventDefault();
         setFindReplaceMode("replace");
         setIsFindReplaceOpen(true);
+        return;
+      }
+
+      // 快捷操作增强：格式化快捷键
+      // Ctrl+B / Cmd+B：加粗
+      if (modKey && e.key === "b" && !e.shiftKey) {
+        e.preventDefault();
+        const activeTextarea = document.activeElement as HTMLTextAreaElement;
+        if (activeTextarea && activeTextarea.tagName === 'TEXTAREA') {
+          const start = activeTextarea.selectionStart;
+          const end = activeTextarea.selectionEnd;
+          const selectedText = activeTextarea.value.substring(start, end);
+          if (selectedText) {
+            const newText = `**${selectedText}**`;
+            const newValue = content.substring(0, start) + newText + content.substring(end);
+            handleContentChange(title, newValue);
+            // 恢复光标位置
+            setTimeout(() => {
+              activeTextarea.focus();
+              activeTextarea.setSelectionRange(start + 2, start + 2 + selectedText.length);
+            }, 0);
+          } else {
+            // 插入加粗占位符
+            const newText = "**粗体文本**";
+            const newValue = content.substring(0, start) + newText + content.substring(end);
+            handleContentChange(title, newValue);
+            setTimeout(() => {
+              activeTextarea.focus();
+              activeTextarea.setSelectionRange(start + 2, start + 2 + 4);
+            }, 0);
+          }
+        }
+        return;
+      }
+
+      // Ctrl+I / Cmd+I：斜体
+      if (modKey && e.key === "i" && !e.shiftKey) {
+        e.preventDefault();
+        const activeTextarea = document.activeElement as HTMLTextAreaElement;
+        if (activeTextarea && activeTextarea.tagName === 'TEXTAREA') {
+          const start = activeTextarea.selectionStart;
+          const end = activeTextarea.selectionEnd;
+          const selectedText = activeTextarea.value.substring(start, end);
+          if (selectedText) {
+            const newText = `*${selectedText}*`;
+            const newValue = content.substring(0, start) + newText + content.substring(end);
+            handleContentChange(title, newValue);
+            setTimeout(() => {
+              activeTextarea.focus();
+              activeTextarea.setSelectionRange(start + 1, start + 1 + selectedText.length);
+            }, 0);
+          } else {
+            const newText = "*斜体文本*";
+            const newValue = content.substring(0, start) + newText + content.substring(end);
+            handleContentChange(title, newValue);
+            setTimeout(() => {
+              activeTextarea.focus();
+              activeTextarea.setSelectionRange(start + 1, start + 1 + 4);
+            }, 0);
+          }
+        }
+        return;
+      }
+
+      // Ctrl+K / Cmd+K：插入链接
+      if (modKey && e.key === "k" && !e.shiftKey) {
+        e.preventDefault();
+        const activeTextarea = document.activeElement as HTMLTextAreaElement;
+        if (activeTextarea && activeTextarea.tagName === 'TEXTAREA') {
+          const start = activeTextarea.selectionStart;
+          const end = activeTextarea.selectionEnd;
+          const selectedText = activeTextarea.value.substring(start, end);
+          const newText = selectedText ? `[${selectedText}](url)` : `[链接文本](url)`;
+          const newValue = content.substring(0, start) + newText + content.substring(end);
+          handleContentChange(title, newValue);
+          setTimeout(() => {
+            activeTextarea.focus();
+            if (selectedText) {
+              activeTextarea.setSelectionRange(start + selectedText.length + 3, start + selectedText.length + 6);
+            } else {
+              activeTextarea.setSelectionRange(start + 2, start + 5);
+            }
+          }, 0);
+        }
+        return;
+      }
+
+      // Ctrl+Shift+K / Cmd+Shift+K：插入代码块
+      if (modKey && e.shiftKey && e.key === "K") {
+        e.preventDefault();
+        const activeTextarea = document.activeElement as HTMLTextAreaElement;
+        if (activeTextarea && activeTextarea.tagName === 'TEXTAREA') {
+          const start = activeTextarea.selectionStart;
+          const end = activeTextarea.selectionEnd;
+          const selectedText = activeTextarea.value.substring(start, end);
+          const newText = selectedText ? `\`\`\`\n${selectedText}\n\`\`\`` : `\`\`\`\n代码\n\`\`\``;
+          const newValue = content.substring(0, start) + newText + content.substring(end);
+          handleContentChange(title, newValue);
+          setTimeout(() => {
+            activeTextarea.focus();
+            if (selectedText) {
+              activeTextarea.setSelectionRange(start + 4, start + 4 + selectedText.length);
+            } else {
+              activeTextarea.setSelectionRange(start + 4, start + 6);
+            }
+          }, 0);
+        }
+        return;
+      }
+
+      // Ctrl+Shift+I / Cmd+Shift+I：插入图片
+      if (modKey && e.shiftKey && e.key === "I") {
+        e.preventDefault();
+        fileInputRef.current?.click();
+        return;
+      }
+
+      // Ctrl+Shift+T / Cmd+Shift+T：插入表格
+      if (modKey && e.shiftKey && e.key === "T") {
+        e.preventDefault();
+        handleInsertTable();
+        return;
+      }
+
+      // Ctrl+/ / Cmd+/：显示快捷键帮助（TODO: 实现快捷键帮助对话框）
+      if (modKey && e.key === "/" && !e.shiftKey) {
+        e.preventDefault();
+        // TODO: 显示快捷键帮助对话框
+        toast({
+          title: "快捷键帮助",
+          description: "Ctrl+B: 加粗 | Ctrl+I: 斜体 | Ctrl+K: 链接 | Ctrl+Shift+K: 代码块 | Ctrl+Shift+I: 图片 | Ctrl+Shift+T: 表格",
+          duration: 5000,
+        });
         return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [view]);
+  }, [view, title, content, handleContentChange, handleInsertTable, toast]);
 
   // 处理查找匹配项
   const handleFind = useCallback((newMatches: Match[], newIndex: number) => {
@@ -1002,13 +1357,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
     setCurrentMatchIndex(-1);
   }, []);
 
-  // 处理云端更新：刷新并放弃本地更改
-  const handleRefreshFromCloud = async (saveLocalFirst: boolean = false) => {
-    if (!cloudUpdateNote) return;
+  // 自动处理云端更新：保存本地更改到版本历史，然后加载云端版本
+  const handleAutoSyncFromCloud = async (updatedNote: any) => {
+    if (!updatedNote || !currentNote) return;
     
-    // 如果需要先保存本地更改
-    if (saveLocalFirst && currentNote) {
-      // 先保存当前本地内容（创建版本历史）
+    // 检查是否有未保存的本地更改
+    const hasLocalChanges = saveStatus === 'unsaved' || 
+                            title !== (currentNote?.title || '') || 
+                            content !== (currentNote?.content || '');
+    
+    // 如果有本地更改，先保存到版本历史
+    if (hasLocalChanges) {
       try {
         await createNoteVersion(currentNote.id, userId, title, content, tags);
         console.log("[NoteManager] 已保存本地更改到版本历史");
@@ -1017,12 +1376,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       }
     }
     
-    // 刷新笔记数据
-    setTitle(cloudUpdateNote.title || "");
-    setContent(cloudUpdateNote.content || "");
+    // 加载云端最新版本
+    setTitle(updatedNote.title || "");
+    setContent(updatedNote.content || "");
     
     // 解析 tags
-    const rawTags = (cloudUpdateNote as any).tags as string | null | undefined;
+    const rawTags = (updatedNote as any).tags as string | null | undefined;
     if (rawTags) {
       setTags(
         rawTags
@@ -1034,27 +1393,23 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
       setTags([]);
     }
     
-    setIsPinned(cloudUpdateNote.is_pinned || false);
-    setIsPublished(cloudUpdateNote.is_published || false);
-    setCurrentNote(cloudUpdateNote);
-    const cloudUpdatedAt = cloudUpdateNote.updated_at || new Date().toISOString();
+    setIsPinned(updatedNote.is_pinned || false);
+    setIsPublished(updatedNote.is_published || false);
+    setCurrentNote(updatedNote);
+    const cloudUpdatedAt = updatedNote.updated_at || new Date().toISOString();
     lastSavedTimestampRef.current = cloudUpdatedAt;
     lastSaveTimeRef.current = new Date(cloudUpdatedAt).getTime();
     setSaveStatus('saved');
-    setCloudUpdateDialogOpen(false);
-    setCloudUpdateNote(null);
-  };
-
-  // 处理云端更新：保留本地更改（覆盖云端）
-  const handleKeepLocalChanges = async () => {
-    if (!currentNote) return;
-    
-    // 关闭对话框
-    setCloudUpdateDialogOpen(false);
     setCloudUpdateNote(null);
     
-    // 使用当前本地内容覆盖云端
-    await saveNote(title, content, isPinned, isPublished, tags);
+    // 显示非阻塞的 Toast 提示
+    toast({
+      title: "已同步云端更新",
+      description: hasLocalChanges 
+        ? "本地更改已保存到版本历史，已加载云端最新版本" 
+        : "已加载云端最新版本",
+      duration: 3000,
+    });
   };
 
   // 点击外部关闭更多菜单
@@ -1386,7 +1741,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
   if (view === 'editor') {
       return (
         <>
-          <div className={cn("fixed inset-0 bg-background z-50 flex flex-col h-[100dvh] animate-in slide-in-from-bottom-4 duration-300", zenMode && "bg-background")}>
+          {/* 过渡动画优化：页面切换 - 进入编辑页：淡入 + 上滑，300ms ease-out */}
+          <div className={cn(
+            "fixed inset-0 bg-background z-50 flex flex-col h-[100dvh]",
+            "animate-in fade-in-0 slide-in-from-bottom-4 duration-300 ease-out",
+            zenMode && "bg-background"
+          )}>
               <header className={cn(
                 "px-2 sm:px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur shrink-0",
                 zenMode && "bg-background border-b border-border/40"
@@ -1400,89 +1760,170 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                         if (saveStatus === "unsaved") {
                           saveNote(title, content, isPinned, isPublished, tags);
                         }
-                        setView("list");
-                        fetchNotes();
+                        // 过渡动画优化：退出编辑页 - 淡出 + 下滑，200ms ease-in
+                        // 使用 setTimeout 延迟切换，让退出动画生效
+                        setTimeout(() => {
+                          setView("list");
+                          fetchNotes();
+                        }, 100);
                       }}
                     >
                       <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1" />
                       <span className="hidden sm:inline">返回</span>
                     </Button>
                   </div>
-                  <div className="flex items-center gap-0.5 sm:gap-1 overflow-x-auto scrollbar-hide flex-1 justify-end min-w-0">
+                  <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-hide flex-1 justify-end min-w-0">
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                       
-                      {/* 桌面端：显示所有按钮 */}
+                      {/* PC端优化：工具栏按钮分组和视觉优化 */}
                       {!zenMode && (
                         <>
-                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入表格" onClick={handleInsertTable}><Table className="w-4 h-4 text-muted-foreground" /></Button>
-                          {/* SegmentedEditor 已内置表格编辑功能，不再需要额外的表格编辑按钮 */}
-                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" title="插入图片" onClick={() => fileInputRef.current?.click()}><ImageIcon className="w-4 h-4 text-muted-foreground" /></Button>
-                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePin} title={isPinned ? "取消置顶" : "置顶笔记"}><Pin className={cn("w-4 h-4 transition-all", isPinned ? "fill-yellow-500 text-yellow-500 rotate-45" : "text-muted-foreground")} /></Button>
-                          <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex" onClick={togglePublish} title={isPublished ? "已发布" : "发布到 Web"}><Globe className={cn("w-4 h-4 transition-all", isPublished ? "text-blue-500" : "text-muted-foreground")} /></Button>
-                          <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
+                          {/* 第一组：插入功能 */}
+                          <div className="hidden sm:flex items-center gap-1 px-1.5 py-1 rounded-md bg-accent/30 border border-border/50">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 shrink-0 hover:bg-accent/80 transition-all" 
+                              title="插入表格" 
+                              onClick={handleInsertTable}
+                            >
+                              <Table className="w-4 h-4 text-foreground/70 hover:text-foreground transition-colors" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 shrink-0 hover:bg-accent/80 transition-all" 
+                              title="插入图片" 
+                              onClick={() => fileInputRef.current?.click()}
+                            >
+                              <ImageIcon className="w-4 h-4 text-foreground/70 hover:text-foreground transition-colors" />
+                            </Button>
+                          </div>
+                          
+                          {/* 第二组：笔记操作 */}
+                          <div className="hidden sm:flex items-center gap-1">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 shrink-0 hover:bg-accent transition-all" 
+                              onClick={togglePin} 
+                              title={isPinned ? "取消置顶" : "置顶笔记"}
+                            >
+                              <Pin className={cn(
+                                "w-4 h-4 transition-all", 
+                                isPinned 
+                                  ? "fill-yellow-500 text-yellow-500 rotate-45" 
+                                  : "text-foreground/60 hover:text-foreground"
+                              )} />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 shrink-0 hover:bg-accent transition-all" 
+                              onClick={togglePublish} 
+                              title={isPublished ? "已发布" : "发布到 Web"}
+                            >
+                              <Globe className={cn(
+                                "w-4 h-4 transition-all", 
+                                isPublished 
+                                  ? "text-blue-500" 
+                                  : "text-foreground/60 hover:text-foreground"
+                              )} />
+                            </Button>
+                          </div>
+                          
+                          {/* 分隔线 */}
+                          <div className="w-[1px] h-6 bg-border/60 mx-1 shrink-0 hidden sm:block"></div>
+                          
+                          {/* 第三组：编辑操作 */}
+                          <div className="hidden sm:flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2.5 shrink-0 flex items-center gap-1.5 hover:bg-accent transition-all"
+                              disabled={!canRevert}
+                              onClick={handleRevertToLastSaved}
+                              title={!canRevert ? "无可撤回操作" : "撤回到上一步"}
+                            >
+                              <RotateCcw className={cn(
+                                "w-4 h-4 transition-colors",
+                                canRevert ? "text-foreground/70" : "text-muted-foreground/50"
+                              )} />
+                              <span className="text-xs font-medium">撤回</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 shrink-0 hover:bg-accent transition-all"
+                              title="版本历史"
+                              onClick={handleOpenVersionHistory}
+                            >
+                              <History className="w-4 h-4 text-foreground/60 hover:text-foreground transition-colors" />
+                            </Button>
+                          </div>
+                          
+                          {/* 分隔线 */}
+                          <div className="w-[1px] h-6 bg-border/60 mx-1 shrink-0 hidden sm:block"></div>
+                          
+                          {/* 第四组：危险操作 */}
+                          <div className="hidden sm:flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 shrink-0 text-foreground/60 hover:text-red-500 hover:bg-red-500/10 transition-all"
+                              title="删除笔记"
+                              onClick={handleDeleteCurrentNote}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </>
                       )}
-                      {!zenMode && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="shrink-0 px-1.5 sm:px-2 text-xs flex items-center gap-0.5 sm:gap-1 hidden sm:flex"
-                            disabled={!canRevert}
-                            onClick={handleRevertToLastSaved}
-                            title={!canRevert ? "无可撤回操作" : "撤回到上一步"}
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span className="hidden sm:inline">撤回</span>
-                          </Button>
-                          <div className="w-[1px] h-4 bg-border mx-0.5 sm:mx-1 shrink-0 hidden sm:block"></div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="shrink-0 hidden sm:flex"
-                            title="版本历史"
-                            onClick={handleOpenVersionHistory}
-                          >
-                            <History className="w-4 h-4 text-muted-foreground" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="shrink-0 hidden sm:flex text-red-500 hover:text-red-600 hover:bg-red-500/10"
-                            title="删除笔记"
-                            onClick={handleDeleteCurrentNote}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
+                      
+                      {/* 分隔线 */}
+                      <div className="w-[1px] h-6 bg-border/60 mx-1 shrink-0 hidden sm:block"></div>
+                      
+                      {/* 第五组：视图切换 */}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="shrink-0 hidden sm:flex"
+                        className="h-8 w-8 shrink-0 hidden sm:flex hover:bg-accent transition-all"
                         title={zenMode ? "退出专注模式" : "进入专注模式"}
                         onClick={() => setZenMode((v) => !v)}
                       >
                         {zenMode ? (
-                          <Minimize2 className="w-4 h-4 text-muted-foreground" />
+                          <Minimize2 className="w-4 h-4 text-foreground/70 hover:text-foreground transition-colors" />
                         ) : (
-                          <Maximize2 className="w-4 h-4 text-muted-foreground" />
+                          <Maximize2 className="w-4 h-4 text-foreground/60 hover:text-foreground transition-colors" />
                         )}
                       </Button>
                       
-                      {/* 移动端：更多菜单按钮 */}
+                      {/* 移动端优化：参考主流产品设计风格（iOS/Material Design/Notion） */}
                       <div className="relative sm:hidden" ref={moreMenuRef}>
                         <button
                           ref={moreButtonRef}
                           type="button"
-                          className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 touch-manipulation"
+                          className={cn(
+                            "shrink-0 inline-flex items-center justify-center",
+                            // 主流产品风格：圆形按钮，无边框
+                            "h-9 w-9 rounded-full",
+                            "text-sm font-medium transition-all duration-150 ease-out",
+                            // iOS/Notion 风格：极简设计，透明背景，无边框
+                            "bg-transparent",
+                            "hover:bg-accent/50",
+                            "active:bg-accent active:scale-95",
+                            "disabled:pointer-events-none disabled:opacity-40",
+                            "touch-manipulation min-w-[36px] min-h-[36px]",
+                            // 菜单打开时的状态：轻微背景色变化
+                            moreMenuOpen && "bg-accent/60"
+                          )}
                           onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
                             if (moreButtonRef.current) {
                               const rect = moreButtonRef.current.getBoundingClientRect();
                               setMenuPosition({
-                                top: rect.bottom + 4,
+                                top: rect.bottom + 8,
                                 right: window.innerWidth - rect.right
                               });
                             }
@@ -1494,35 +1935,60 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                             if (moreButtonRef.current) {
                               const rect = moreButtonRef.current.getBoundingClientRect();
                               setMenuPosition({
-                                top: rect.bottom + 4,
+                                top: rect.bottom + 8,
                                 right: window.innerWidth - rect.right
                               });
                             }
                             setMoreMenuOpen((prev) => !prev);
                           }}
                         >
-                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
+                          {/* 主流产品风格：简洁的图标，标准大小 */}
+                          <MoreVertical className={cn(
+                            "w-5 h-5 transition-colors duration-150",
+                            // iOS/Notion 风格：使用系统标准的图标颜色
+                            "text-foreground/80",
+                            moreMenuOpen && "text-foreground"
+                          )} />
                         </button>
                       </div>
                       
-                      {/* 更多菜单弹出层 - 使用 Portal 渲染到 body */}
+                      {/* 更多菜单弹出层 - 参考主流产品设计风格（iOS/Material Design） */}
                       {moreMenuOpen && typeof document !== 'undefined' && createPortal(
-                        <div
-                          ref={moreMenuPortalRef}
-                          className="fixed w-48 rounded-lg border border-border bg-popover shadow-lg z-[99999] py-1"
-                          style={{ 
-                            top: `${menuPosition.top}px`,
-                            right: `${Math.max(8, menuPosition.right)}px`,
-                            maxWidth: `calc(100vw - 16px)`
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          onTouchStart={(e) => e.stopPropagation()}
-                          onTouchEnd={(e) => e.stopPropagation()}
-                        >
+                        <>
+                          {/* 主流产品风格：点击外部区域关闭菜单 */}
+                          <div
+                            className="fixed inset-0 z-[99998] bg-black/20 backdrop-blur-sm"
+                            onClick={() => setMoreMenuOpen(false)}
+                            onTouchEnd={() => setMoreMenuOpen(false)}
+                            aria-hidden
+                          />
+                          {/* 主流产品风格：圆角卡片菜单，毛玻璃效果 */}
+                          <div
+                            ref={moreMenuPortalRef}
+                            className={cn(
+                              "fixed z-[99999] py-2",
+                              "w-56 rounded-2xl",
+                              // iOS/Notion 风格：毛玻璃效果，极细边框
+                              "bg-popover/95 backdrop-blur-xl",
+                              "border border-border/40",
+                              "shadow-2xl",
+                              // 主流产品风格：平滑动画
+                              "animate-in fade-in-0 zoom-in-95 duration-200"
+                            )}
+                            style={{ 
+                              // 移动端优化：菜单显示在按钮下方
+                              top: `${menuPosition.top}px`,
+                              right: `${Math.max(12, menuPosition.right)}px`,
+                              maxWidth: `calc(100vw - 24px)`
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                          >
                             {!zenMode && (
                               <>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -1540,7 +2006,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <span>插入图片</span>
                                 </button>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -1559,7 +2025,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                 </button>
                                 {/* SegmentedEditor 已内置表格编辑功能，不再需要额外的表格编辑按钮 */}
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -1577,7 +2043,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <span>{isPinned ? "取消置顶" : "置顶笔记"}</span>
                                 </button>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -1594,9 +2060,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <Globe className={cn("w-4 h-4", isPublished ? "text-blue-500" : "")} />
                                   <span>{isPublished ? "取消发布" : "发布到 Web"}</span>
                                 </button>
-                                <div className="h-[1px] bg-border my-1"></div>
+                                {/* 主流产品风格：更精致的分隔线 */}
+                                <div className="h-px bg-border/50 my-1.5 mx-2"></div>
                                 <button
-                                  className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                                  className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -1615,11 +2082,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                   <Search className="w-4 h-4" />
                                   <span>查找与替换</span>
                                 </button>
-                                <div className="h-[1px] bg-border my-1"></div>
+                                {/* 主流产品风格：更精致的分隔线 */}
+                                <div className="h-px bg-border/50 my-1.5 mx-2"></div>
                               </>
                             )}
                             <button
-                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+                              className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation transition-colors duration-150"
                               disabled={!canRevert}
                               onClick={(e) => {
                                 e.preventDefault();
@@ -1642,7 +2110,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                               <span>撤回</span>
                             </button>
                             <button
-                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                              className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -1659,9 +2127,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                               <History className="w-4 h-4" />
                               <span>版本历史</span>
                             </button>
-                            <div className="h-[1px] bg-border my-1"></div>
+                            {/* 主流产品风格：更精致的分隔线 */}
+                            <div className="h-px bg-border/50 my-1.5 mx-2"></div>
                             <button
-                              className="w-full px-4 py-2 text-left text-sm hover:bg-red-500/10 text-red-500 flex items-center gap-2 touch-manipulation"
+                              className="w-full px-4 py-3 text-left text-sm hover:bg-red-500/10 active:bg-red-500/20 text-red-500 flex items-center gap-3 touch-manipulation transition-colors duration-150"
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -1679,7 +2148,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                               <span>删除笔记</span>
                             </button>
                             <button
-                              className="w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 touch-manipulation"
+                              className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -1705,28 +2174,122 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                                 </>
                               )}
                             </button>
-                        </div>
+                          </div>
+                        </>
                         , document.body
                       )}
                       
-                      {/* 编辑/预览切换（专注模式下隐藏） */}
-                      {!zenMode && (
-                        <button onClick={() => setPreviewMode(!previewMode)} className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition">{previewMode ? <><PenLine size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">编辑</span></> : <><Eye size={12} className="sm:w-3.5 sm:h-3.5"/><span className="hidden sm:inline">预览</span></>}</button>
-                      )}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {!isOnlineState && (
-                          <div className="flex items-center gap-1 text-xs text-amber-600" title="离线模式 - 更改将保存到本地">
-                            <WifiOff className="w-3 h-3" />
-                            <span className="hidden sm:inline">离线</span>
+                      {/* 移动端优化：参考主流产品设计，重新布局右侧按钮 */}
+                      <div className="flex items-center gap-2 sm:gap-1.5 shrink-0">
+                        {/* 编辑/预览切换（专注模式下隐藏） */}
+                        {!zenMode && (
+                          <button 
+                            onClick={() => setPreviewMode(!previewMode)} 
+                            className="shrink-0 flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-full bg-accent text-accent-foreground text-xs font-medium hover:bg-accent/80 transition touch-manipulation"
+                          >
+                            {previewMode ? (
+                              <>
+                                <PenLine size={12} className="sm:w-3.5 sm:h-3.5"/>
+                                <span className="hidden sm:inline">编辑</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eye size={12} className="sm:w-3.5 sm:h-3.5"/>
+                                <span className="hidden sm:inline">预览</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                        
+                        {/* 移动端优化：合并状态指示器，只在重要状态时显示 */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* PC端：完整显示网络状态和保存状态 */}
+                          <div className="hidden sm:flex items-center gap-1.5">
+                            {/* 指示状态优化：网络状态显示 */}
+                            {!isOnlineState ? (
+                              <div className="flex items-center gap-1.5 text-xs text-red-500 animate-in fade-in-0 duration-200" title="离线模式 - 更改将保存到本地">
+                                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                <WifiOff className="w-3 h-3" />
+                                <span>离线</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 text-xs text-green-500" title="在线 - 更改将同步到云端">
+                                <div className="w-2 h-2 rounded-full bg-green-500" />
+                                <span>在线</span>
+                              </div>
+                            )}
+                            {/* 保存状态优化：图标 + 动画反馈 */}
+                            <div className="flex items-center gap-1.5 text-xs shrink-0">
+                              {saveStatus === 'saving' ? (
+                                <div className="flex items-center gap-1.5 text-blue-500 animate-in fade-in-0 duration-200">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>保存中...</span>
+                                </div>
+                              ) : saveStatus === 'error' ? (
+                                <div className="flex items-center gap-1.5 text-red-500 animate-in fade-in-0 duration-200">
+                                  <X className="w-3.5 h-3.5 animate-in zoom-in-50 duration-200" />
+                                  <span>保存失败</span>
+                                </div>
+                              ) : saveStatus === 'unsaved' ? (
+                                <div className="flex items-center gap-1.5 text-yellow-500 animate-in fade-in-0 duration-200">
+                                  <Pencil className="w-3.5 h-3.5 animate-pulse" />
+                                  <span>未保存</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 text-green-500 animate-in fade-in-0 duration-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5 animate-in zoom-in-50 duration-200" />
+                                  <span>已保存</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* 移动端优化：精简状态显示，只在异常状态时显示 */}
+                          <div className="flex items-center gap-1.5 sm:hidden">
+                            {/* 只在离线或保存失败时显示网络状态 */}
+                            {!isOnlineState && (
+                              <div 
+                                className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" 
+                                title="离线模式 - 更改将保存到本地"
+                              />
+                            )}
+                            {/* 保存状态：只在非正常状态时显示图标 */}
+                            {saveStatus === 'saving' ? (
+                              <div title="保存中...">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500 shrink-0" />
+                              </div>
+                            ) : saveStatus === 'error' ? (
+                              <div title="保存失败">
+                                <X className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                              </div>
+                            ) : saveStatus === 'unsaved' ? (
+                              <div title="未保存">
+                                <Pencil className="w-3.5 h-3.5 animate-pulse text-yellow-500 shrink-0" />
+                              </div>
+                            ) : null}
+                            {/* 已保存状态：移动端不显示，减少视觉干扰 */}
+                          </div>
+                        </div>
+                        
+                        {/* 内容辅助功能：字数统计 */}
+                        {!zenMode && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                            <span className="hidden sm:inline">{wordStats.words} 字</span>
+                            <span className="hidden md:inline">· {wordStats.paragraphs} 段</span>
+                            <span className="hidden lg:inline">· 约 {wordStats.readingTime} 分钟</span>
                           </div>
                         )}
-                        <div className="text-xs text-muted-foreground w-8 sm:w-12 text-right shrink-0">{saveStatus === 'saving' ? <Loader2 className="w-3 h-3 animate-spin ml-auto text-blue-500"/> : <CheckCircle2 className="w-3 h-3 ml-auto text-green-600"/>}</div>
                       </div>
                   </div>
               </header>
               <div className={cn(
                 "flex-1 mx-auto w-full flex flex-col overflow-y-auto min-h-0",
-                zenMode ? "max-w-4xl px-8 py-12" : "max-w-3xl p-3 sm:p-4 md:p-8"
+                // 内容区域优化：根据屏幕尺寸动态调整行宽
+                // 移动端优化：为底部工具栏预留空间，避免被键盘遮挡
+                "pb-20 sm:pb-0",
+                zenMode 
+                  ? "max-w-4xl px-8 py-12" 
+                  : "max-w-full sm:max-w-3xl md:max-w-4xl p-3 sm:p-4 md:p-8"
               )}>
                   {/* 查找替换面板 */}
                   {isFindReplaceOpen && (
@@ -1741,30 +2304,50 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       mode={findReplaceMode}
                     />
                   )}
-                  <Input
-                    value={title}
-                    onChange={(e) => handleContentChange(e.target.value, content)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        // 标题栏回车后光标进入正文区域
-                        requestAnimationFrame(() => {
-                          const firstTextarea = editorScrollContainerRef.current?.querySelector("textarea");
-                          if (firstTextarea) {
-                            (firstTextarea as HTMLTextAreaElement).focus();
-                          }
-                        });
-                      }
-                    }}
-                    placeholder="无标题"
-                    className={cn(
-                      "border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto",
-                      zenMode 
-                        ? "text-4xl md:text-5xl font-bold py-6" 
-                        : "text-3xl md:text-4xl font-bold py-4",
-                      previewMode && "opacity-80 pointer-events-none"
-                    )}
-                  />
+                  <div className="relative group">
+                    <Input
+                      value={title}
+                      onChange={(e) => {
+                        let newTitle = e.target.value;
+                        // 支持 Markdown 标题语法：自动识别 # ## ###
+                        // 实际存储时保留原始输入（包含 #）
+                        handleContentChange(newTitle, content);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          // 标题栏回车后光标进入正文区域
+                          requestAnimationFrame(() => {
+                            const firstTextarea = editorScrollContainerRef.current?.querySelector("textarea");
+                            if (firstTextarea) {
+                              (firstTextarea as HTMLTextAreaElement).focus();
+                            }
+                          });
+                        }
+                      }}
+                      placeholder="无标题"
+                      className={cn(
+                        "border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto",
+                        "transition-all duration-200",
+                        "relative",
+                        zenMode 
+                          ? "text-4xl md:text-5xl font-bold py-6" 
+                          : "text-3xl md:text-4xl font-bold py-4",
+                        previewMode && "opacity-80 pointer-events-none",
+                        // 支持 Markdown 标题语法显示
+                        title.startsWith('# ') && "text-2xl md:text-3xl",
+                        title.startsWith('## ') && "text-xl md:text-2xl",
+                        title.startsWith('### ') && "text-lg md:text-xl"
+                      )}
+                    />
+                    {/* 下划线装饰 - 仅在聚焦时显示 */}
+                    <div 
+                      className={cn(
+                        "absolute bottom-0 left-0 h-0.5 bg-primary transition-all duration-200",
+                        "w-0 opacity-0 group-focus-within:w-full group-focus-within:opacity-100"
+                      )}
+                    />
+                  </div>
                   {/* 标签编辑区域（专注模式下隐藏） */}
                   {!zenMode && (
                   <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -1831,9 +2414,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                       <div
                         ref={editorScrollContainerRef}
                         className="flex-1 min-h-0 overflow-y-auto"
-                        onScroll={() => {
-                          if (editorScrollContainerRef.current) {
-                            savedScrollTopRef.current = editorScrollContainerRef.current.scrollTop;
+                        style={{
+                          // 移动端优化：自动调整编辑器位置，避免被键盘遮挡
+                          scrollPaddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+                          WebkitOverflowScrolling: 'touch' as any,
+                        } as React.CSSProperties}
+                        onScroll={(e) => {
+                          // 保存滚动位置，用于移动端编辑后恢复
+                          if (e.currentTarget) {
+                            savedScrollTopRef.current = e.currentTarget.scrollTop;
                           }
                         }}
                         onBlur={(e) => {
@@ -1850,7 +2439,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                           placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
                           className={cn(
                             "w-full min-h-[200px]",
-                            zenMode ? "text-lg leading-relaxed" : "text-base sm:text-lg leading-relaxed"
+                            // 内容区域优化：行高 1.75，字间距 0.01em
+                            zenMode 
+                              ? "text-lg leading-[1.75] tracking-[0.01em]" 
+                              : "text-base sm:text-lg leading-[1.75] tracking-[0.01em]"
                           )}
                           onInsertTable={handleInsertTable}
                         />
@@ -1887,6 +2479,33 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                           </ul>
                         </div>
                       )}
+                      {/* 内容辅助功能：标签补全菜单 */}
+                      {tagMenuOpen && tagCandidates.length > 0 && (
+                        <div className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-lg border border-border bg-popover shadow-lg z-10">
+                          <div className="px-3 py-2 border-b border-border/60 text-xs text-muted-foreground">
+                            选择标签（↑↓ 选择，Enter 确认）
+                          </div>
+                          <ul className="max-h-64 overflow-y-auto text-sm">
+                            {tagCandidates.map((tag, idx) => (
+                              <li
+                                key={tag}
+                                className={cn(
+                                  "px-3 py-2 cursor-pointer hover:bg-accent",
+                                  idx === tagActiveIndex && "bg-accent"
+                                )}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  handleInsertTag(tag);
+                                }}
+                              >
+                                <div className="font-medium truncate">
+                                  #{tag}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       
                       {/* 笔记统计信息 - 放在编辑器容器内，确保在内容下方 */}
                       {currentNote && (
@@ -1901,41 +2520,98 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
               </div>
           </div>
           
-          {/* 云端更新提示 Dialog */}
-          <Dialog open={cloudUpdateDialogOpen} onOpenChange={setCloudUpdateDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>云端有更新</DialogTitle>
-                <DialogDescription>
-                  检测到其他设备更新了这篇笔记。你可以选择查看最新内容，或保留当前编辑的内容。
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button
-                  variant="outline"
-                  onClick={handleKeepLocalChanges}
-                >
-                  保留我的更改
-                </Button>
-                <Button
+          {/* 移动端优化：底部固定工具栏 */}
+          {view === 'editor' && (
+            <div className="fixed bottom-0 left-0 right-0 sm:hidden z-50 bg-background/95 backdrop-blur-md border-t border-border shadow-lg safe-area-inset-bottom">
+              <div className="flex items-center justify-around px-2 py-2 gap-1" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' }}>
+                {/* 常用功能：保存、预览、专注 */}
+                <button
                   onClick={() => {
-                    // 检查是否有未保存的更改
-                    if (saveStatus === 'unsaved' || title !== (currentNote?.title || '') || content !== (currentNote?.content || '')) {
-                      // 有未保存的更改，显示确认对话框
-                      setCloudUpdateDialogOpen(false);
-                      setRefreshConfirmDialogOpen(true);
-                    } else {
-                      // 没有未保存的更改，直接刷新
-                      handleRefreshFromCloud(false);
+                    if (saveStatus === 'unsaved') {
+                      saveNote(title, content, isPinned, isPublished, tags);
                     }
                   }}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation",
+                    "min-w-[44px] min-h-[44px]",
+                    saveStatus === 'unsaved' ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                  )}
+                  title="保存"
                 >
-                  查看最新内容
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
+                  {saveStatus === 'saving' ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : saveStatus === 'saved' ? (
+                    <CheckCircle2 className="w-5 h-5" />
+                  ) : (
+                    <Pencil className="w-5 h-5" />
+                  )}
+                  <span className="text-[10px] font-medium">保存</span>
+                </button>
+                
+                {!zenMode && (
+                  <button
+                    onClick={() => setPreviewMode(!previewMode)}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation",
+                      "min-w-[44px] min-h-[44px]",
+                      previewMode ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                    )}
+                    title={previewMode ? "编辑" : "预览"}
+                  >
+                    {previewMode ? (
+                      <PenLine className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                    <span className="text-[10px] font-medium">{previewMode ? "编辑" : "预览"}</span>
+                  </button>
+                )}
+                
+                <button
+                  onClick={() => setZenMode(!zenMode)}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation",
+                    "min-w-[44px] min-h-[44px]",
+                    zenMode ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                  )}
+                  title={zenMode ? "退出专注" : "专注模式"}
+                >
+                  {zenMode ? (
+                    <Minimize2 className="w-5 h-5" />
+                  ) : (
+                    <Maximize2 className="w-5 h-5" />
+                  )}
+                  <span className="text-[10px] font-medium">专注</span>
+                </button>
+                
+                {/* 更多功能按钮 */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (moreButtonRef.current) {
+                      const rect = moreButtonRef.current.getBoundingClientRect();
+                      setMenuPosition({
+                        top: rect.top - 200, // 在底部工具栏上方显示
+                        right: window.innerWidth - rect.right
+                      });
+                    }
+                    setMoreMenuOpen((prev) => !prev);
+                  }}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation",
+                    "min-w-[44px] min-h-[44px]",
+                    moreMenuOpen ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                  )}
+                  title="更多"
+                >
+                  <MoreVertical className="w-5 h-5" />
+                  <span className="text-[10px] font-medium">更多</span>
+                </button>
+              </div>
+            </div>
+          )}
+          
           {/* 版本历史对话框 */}
           <Dialog open={versionHistoryDialogOpen} onOpenChange={setVersionHistoryDialogOpen}>
             <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
@@ -2040,50 +2716,6 @@ export default function NoteManager({ userId, folderId, folderName, onBack }: No
                     恢复选中版本
                   </Button>
                 )}
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* 刷新确认对话框：询问是否先保存本地更改 */}
-          <Dialog open={refreshConfirmDialogOpen} onOpenChange={setRefreshConfirmDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>确认刷新</DialogTitle>
-                <DialogDescription>
-                  刷新将使用云端版本，当前未保存的更改将丢失。
-                  <br />
-                  是否先保存当前更改到版本历史？保存后仍可恢复。
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setRefreshConfirmDialogOpen(false);
-                    setCloudUpdateDialogOpen(true);
-                  }}
-                >
-                  取消
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    // 不保存，直接刷新
-                    handleRefreshFromCloud(false);
-                    setRefreshConfirmDialogOpen(false);
-                  }}
-                >
-                  不保存，直接刷新
-                </Button>
-                <Button
-                  onClick={() => {
-                    // 先保存到版本历史，再刷新
-                    handleRefreshFromCloud(true);
-                    setRefreshConfirmDialogOpen(false);
-                  }}
-                >
-                  保存后刷新
-                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

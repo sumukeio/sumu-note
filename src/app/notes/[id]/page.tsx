@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Link2, Loader2, ChevronUp, ChevronDown, X } from "lucide-react";
+import { ArrowLeft, Link2, Loader2, ChevronUp, ChevronDown, X, Edit } from "lucide-react";
 import { findAllMatches, getNextMatchIndex, getPreviousMatchIndex, type Match } from "@/lib/search-utils";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +14,7 @@ interface Note {
   title: string | null;
   content: string | null;
   updated_at: string | null;
+  folder_id?: string | null;
 }
 
 interface BacklinkItem {
@@ -130,6 +131,13 @@ export default function NoteDetailPage() {
     run();
   }, [noteIdOrTitle]);
 
+  // 当搜索查询变化时，重置滚动标志，确保能定位到第一个匹配项
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      hasScrolledRef.current = false;
+    }
+  }, [searchQuery]);
+
   // 查找所有匹配项并高亮
   useEffect(() => {
     if (!searchQuery.trim() || !note?.content || !contentRef.current) {
@@ -149,7 +157,7 @@ export default function NoteDetailPage() {
       return;
     }
 
-    // 等待 ReactMarkdown 渲染完成
+    // 等待 ReactMarkdown 渲染完成，增加延迟确保 DOM 完全渲染
     const timer = setTimeout(() => {
       if (!contentRef.current) return;
 
@@ -173,7 +181,19 @@ export default function NoteDetailPage() {
       const walker = document.createTreeWalker(
         contentRef.current,
         NodeFilter.SHOW_TEXT,
-        null
+        {
+          acceptNode: (node) => {
+            // 跳过已经在 mark 标签内的文本节点（避免重复高亮）
+            let parent = node.parentElement;
+            while (parent && parent !== contentRef.current) {
+              if (parent.tagName === 'MARK' && parent.classList.contains('search-match')) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              parent = parent.parentElement;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
       );
 
       const newHighlights: HTMLElement[] = [];
@@ -191,15 +211,41 @@ export default function NoteDetailPage() {
             range.setStart(node, searchIndex);
             range.setEnd(node, searchIndex + query.length);
             
+            // 检查范围是否有效且不在已有的高亮内
+            if (range.collapsed) {
+              searchIndex += query.length;
+              continue;
+            }
+            
             const highlight = document.createElement('mark');
             highlight.className = 'bg-yellow-200 dark:bg-yellow-900 px-0.5 rounded search-match';
             highlight.style.scrollMarginTop = '100px';
+            highlight.setAttribute('data-search-match', 'true');
             
             range.surroundContents(highlight);
             newHighlights.push(highlight);
             searchIndex += query.length;
           } catch (e) {
-            // 如果无法包围（跨节点），跳过
+            // 如果无法包围（跨节点），尝试使用更精确的方法
+            try {
+              const range = document.createRange();
+              range.setStart(node, searchIndex);
+              range.setEnd(node, Math.min(searchIndex + query.length, nodeText.length));
+              
+              if (!range.collapsed) {
+                const highlight = document.createElement('mark');
+                highlight.className = 'bg-yellow-200 dark:bg-yellow-900 px-0.5 rounded search-match';
+                highlight.style.scrollMarginTop = '100px';
+                highlight.setAttribute('data-search-match', 'true');
+                
+                const contents = range.extractContents();
+                highlight.appendChild(contents);
+                range.insertNode(highlight);
+                newHighlights.push(highlight);
+              }
+            } catch (e2) {
+              // 如果还是失败，跳过这个匹配
+            }
             searchIndex += query.length;
           }
         }
@@ -207,19 +253,26 @@ export default function NoteDetailPage() {
 
       setHighlightElements(newHighlights);
       
-      // 如果有匹配项，滚动到第一个
+      // 如果有匹配项，滚动到第一个（首次进入时）
       if (textMatches.length > 0 && !hasScrolledRef.current) {
         setCurrentMatchIndex(0);
-        scrollToMatch(0, newHighlights);
-        hasScrolledRef.current = true;
+        // 使用 requestAnimationFrame 确保 DOM 更新完成
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            scrollToMatch(0, newHighlights);
+            hasScrolledRef.current = true;
+          }, 100);
+        });
       } else if (textMatches.length > 0) {
         // 如果已经滚动过，确保当前索引有效
         if (currentMatchIndex < 0 || currentMatchIndex >= newHighlights.length) {
           setCurrentMatchIndex(0);
         }
-        scrollToMatch(currentMatchIndex >= 0 ? currentMatchIndex : 0, newHighlights);
+        requestAnimationFrame(() => {
+          scrollToMatch(currentMatchIndex >= 0 ? currentMatchIndex : 0, newHighlights);
+        });
       }
-    }, 500);
+    }, 600); // 增加延迟确保 markdown 完全渲染
 
     return () => {
       clearTimeout(timer);
@@ -231,20 +284,36 @@ export default function NoteDetailPage() {
     if (index < 0 || index >= highlights.length) return;
     
     const highlight = highlights[index];
-    if (highlight) {
+    if (highlight && highlight.isConnected) {
       // 移除所有高亮的当前样式
       highlights.forEach((el) => {
-        el.classList.remove('ring-2', 'ring-blue-500');
+        if (el.isConnected) {
+          el.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2');
+        }
       });
       
       // 添加当前高亮的样式
-      highlight.classList.add('ring-2', 'ring-blue-500');
+      highlight.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2');
       
+      // 使用 scrollIntoView 定位，并添加一些偏移
       highlight.scrollIntoView({
         behavior: 'smooth',
         block: 'center',
         inline: 'nearest'
       });
+      
+      // 确保高亮元素在可视区域内（处理可能的布局偏移）
+      setTimeout(() => {
+        const rect = highlight.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        if (rect.top < 100 || rect.bottom > viewportHeight - 100) {
+          highlight.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'nearest'
+          });
+        }
+      }, 100);
     }
   };
 
@@ -308,6 +377,17 @@ export default function NoteDetailPage() {
     router.back();
   };
 
+  const handleEdit = () => {
+    if (!note) return;
+    // 跳转到 dashboard 并打开笔记编辑模式
+    const params = new URLSearchParams();
+    if (note.folder_id) {
+      params.set('folder', note.folder_id);
+    }
+    params.set('note', note.id);
+    router.push(`/dashboard?${params.toString()}`);
+  };
+
   const renderBacklinkSnippet = (item: BacklinkItem): string => {
     const content = item.content || "";
     if (!content) return "";
@@ -349,15 +429,26 @@ export default function NoteDetailPage() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-3xl mx-auto px-3 sm:px-4 py-6 pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <header className="flex items-center justify-between gap-2 mb-6 flex-wrap">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-2 min-h-10 touch-manipulation shrink-0"
-            onClick={handleBack}
-          >
-            <ArrowLeft className="w-4 h-4 mr-1" />
-            返回
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2 min-h-10 touch-manipulation shrink-0"
+              onClick={handleBack}
+            >
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              返回
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              className="min-h-10 touch-manipulation shrink-0"
+              onClick={handleEdit}
+            >
+              <Edit className="w-4 h-4 mr-1" />
+              编辑
+            </Button>
+          </div>
           <div className="flex items-center gap-4">
             {/* 搜索结果导航 */}
             {searchQuery.trim() && matches.length > 0 && (
@@ -402,7 +493,8 @@ export default function NoteDetailPage() {
 
           <section 
             ref={contentRef}
-            className="prose prose-sm sm:prose-base dark:prose-invert max-w-none"
+            className="prose prose-sm sm:prose-base dark:prose-invert max-w-none select-text"
+            style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
           >
             <MarkdownRenderer content={note.content || ""} />
           </section>

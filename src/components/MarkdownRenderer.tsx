@@ -37,7 +37,15 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
 
   return (
     <div 
-      className="prose prose-sm sm:prose-base dark:prose-invert max-w-none"
+      className="prose prose-sm sm:prose-base dark:prose-invert max-w-none select-text"
+      style={{ 
+        userSelect: 'text', 
+        WebkitUserSelect: 'text', 
+        msUserSelect: 'text',
+        // 内容区域优化：行高 1.75，字间距 0.01em，段落间距 1.5rem
+        lineHeight: '1.75',
+        letterSpacing: '0.01em',
+      }}
       onTouchStart={(e) => {
         // 如果触摸的是链接，阻止事件冒泡到父级（避免触发右边缘滑动返回）
         const target = e.target as HTMLElement;
@@ -163,6 +171,51 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
             >
               {children}
             </td>
+          ),
+          // 内容区域优化：列表样式优化（更清晰的层级关系）
+          ul: ({ children, ...props }) => (
+            <ul
+              {...props}
+              className="my-4 ml-6 list-disc space-y-2"
+              style={{ marginBottom: '1.5rem' }}
+            >
+              {children}
+            </ul>
+          ),
+          ol: ({ children, ...props }) => (
+            <ol
+              {...props}
+              className="my-4 ml-6 list-decimal space-y-2"
+              style={{ marginBottom: '1.5rem' }}
+            >
+              {children}
+            </ol>
+          ),
+          li: ({ children, ...props }) => (
+            <li
+              {...props}
+              className="my-1"
+              style={{ 
+                lineHeight: '1.75',
+                letterSpacing: '0.01em'
+              }}
+            >
+              {children}
+            </li>
+          ),
+          // 内容区域优化：段落间距
+          p: ({ children, ...props }) => (
+            <p
+              {...props}
+              className="my-4"
+              style={{ 
+                marginBottom: '1.5rem',
+                lineHeight: '1.75',
+                letterSpacing: '0.01em'
+              }}
+            >
+              {children}
+            </p>
           ),
         }}
       >
