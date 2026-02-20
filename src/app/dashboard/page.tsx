@@ -58,6 +58,8 @@ function DashboardPageContent() {
 
   // 🔥 状态：当前查看的文件夹 (null 代表看根目录文件夹列表)
   const [currentFolder, setCurrentFolder] = useState<{id: string, name: string} | null>(null);
+  // 文件夹导航栈：用于返回上一级
+  const [folderStack, setFolderStack] = useState<Array<{id: string, name: string}>>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -524,16 +526,35 @@ function DashboardPageContent() {
                 folderId={currentFolder.id} 
                 folderName={currentFolder.name}
                 onBack={() => {
-                  setCurrentFolder(null);
+                  // 返回上一级文件夹
+                  if (folderStack.length > 0) {
+                    const previousFolder = folderStack[folderStack.length - 1];
+                    setFolderStack(prev => prev.slice(0, -1));
+                    setCurrentFolder(previousFolder);
+                  } else {
+                    // 如果栈为空，返回根目录
+                    setCurrentFolder(null);
+                  }
                   setInitialNoteId(null);
-                }} // 返回到文件夹列表
+                }}
+                onEnterFolder={(id, name) => {
+                  // 进入子文件夹时，将当前文件夹推入栈
+                  if (currentFolder) {
+                    setFolderStack(prev => [...prev, currentFolder]);
+                  }
+                  setCurrentFolder({ id, name });
+                }}
                 initialNoteId={initialNoteId} // 传入初始笔记 ID，自动打开编辑模式
             />
         ) : (
             // 👀 模式 A: 查看文件夹列表 (默认)
             <FolderManager 
                 userId={user.id} 
-                onEnterFolder={(id, name) => setCurrentFolder({ id, name })} 
+                onEnterFolder={(id, name) => {
+                  // 从根目录进入文件夹时，清空栈
+                  setFolderStack([]);
+                  setCurrentFolder({ id, name });
+                }} 
             />
         )}
       </main>

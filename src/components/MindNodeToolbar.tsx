@@ -27,11 +27,12 @@ export default function MindNodeToolbar({
   return (
     <div
       className={cn(
-        "fixed left-0 right-0 bottom-0 z-50 transition-all duration-300 ease-in-out",
+        "fixed left-0 right-0 z-50 transition-all duration-300 ease-in-out",
         isVisible
           ? "translate-y-0 opacity-100"
           : "translate-y-full opacity-0 pointer-events-none"
       )}
+      style={{ bottom: 'calc(0px + var(--vv-bottom-inset, 0px))' }}
     >
       <div className="bg-background/95 backdrop-blur-md border-t border-border shadow-2xl" data-toolbar>
         <div className="max-w-4xl mx-auto px-4 py-3">

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { Input } from "@/components/ui/input";
+import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
@@ -36,9 +38,22 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   const isSelectionMode = selectedIds.size > 0;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const ignoreClickRef = useRef(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  
+  // 拖拽传感器配置
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
+  );
 
   const fetchFolders = async () => {
-    const { data } = await supabase.from('folders').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    // 只获取根文件夹（parent_id 为 null 的文件夹）
+    const { data } = await supabase
+      .from('folders')
+      .select('*')
+      .eq('user_id', userId)
+      .is('parent_id', null)
+      .order('created_at', { ascending: false });
     if (data) setFolders(data);
     setLoading(false);
   };
@@ -195,31 +210,211 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
     }
   };
 
+  // 拖拽处理函数
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+    // 如果拖拽的文件夹未被选中，自动选中它
+    if (!selectedIds.has(event.active.id as string)) {
+      const newSet = new Set(selectedIds);
+      newSet.add(event.active.id as string);
+      setSelectedIds(newSet);
+    }
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    setActiveId(null);
+    const { over } = event;
+    if (!over) return;
+    
+    const draggedFolderId = event.active.id as string;
+    const targetFolderId = over.id as string;
+    
+    // 如果拖拽到另一个文件夹上
+    if (targetFolderId !== draggedFolderId && targetFolderId.startsWith('folder-')) {
+      const actualTargetId = targetFolderId.replace('folder-', '');
+      // 检查不能将文件夹拖到自己或自己的子文件夹中
+      if (actualTargetId === draggedFolderId) return;
+      
+      // 检查循环引用：不能将文件夹拖到自己的子文件夹中
+      const checkCircularReference = (folderId: string, targetId: string): boolean => {
+        const targetFolder = folders.find(f => f.id === targetId);
+        if (!targetFolder) return false;
+        if (targetFolder.parent_id === folderId) return true;
+        if (targetFolder.parent_id) {
+          return checkCircularReference(folderId, targetFolder.parent_id);
+        }
+        return false;
+      };
+      
+      if (checkCircularReference(draggedFolderId, actualTargetId)) {
+        toast({
+          title: "移动失败",
+          description: "不能将文件夹移动到自己的子文件夹中",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // 执行移动（保留文件夹结构）
+      const { error, data } = await supabase
+        .from('folders')
+        .update({ parent_id: actualTargetId })
+        .eq('id', draggedFolderId)
+        .select();
+      
+      if (!error && data && data.length > 0) {
+        toast({
+          title: "移动成功",
+          description: "文件夹已移动",
+          variant: "default",
+        });
+        // 刷新文件夹列表
+        await fetchFolders();
+        exitSelectionMode();
+      } else {
+        toast({
+          title: "移动失败",
+          description: error.message || "移动文件夹时出错",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  // 可拖拽的文件夹卡片组件
+  function DraggableFolderCard({ folder, isSelected, isSelectionMode, onClick, onTouchStart, onTouchEnd, onMouseDown, onMouseUp }: any) {
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+      id: folder.id,
+      data: folder,
+    });
+    const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.5 : 1 };
+    
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        {...attributes}
+        className={cn("relative aspect-square rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all select-none cursor-pointer group", isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border hover:bg-accent/50 active:scale-95")}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
+        onClick={onClick}
+      >
+        <Folder className={cn("w-10 h-10 transition-colors", isSelected ? "text-blue-500 fill-blue-500/20" : "text-yellow-500 fill-yellow-500/20")} />
+        <span className="text-xs font-medium text-center truncate w-full px-2">{folder.name}</span>
+        {isSelectionMode && (<div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-background border-2 border-muted-foreground flex items-center justify-center">{isSelected && <div className="w-full h-full bg-blue-500 rounded-full flex items-center justify-center"><Check className="w-3 h-3 text-white"/></div>}</div>)}
+      </div>
+    );
+  }
+
+  // 可放置的文件夹卡片组件
+  function DroppableFolderCard({ folder, isSelected, isSelectionMode, onClick, onTouchStart, onTouchEnd, onMouseDown, onMouseUp, activeId }: any) {
+    const { setNodeRef, isOver } = useDroppable({
+      id: `folder-${folder.id}`,
+    });
+    const isDraggingThis = activeId === folder.id;
+    
+    return (
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "relative aspect-square rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all select-none cursor-pointer group",
+          isOver && !isDraggingThis && "bg-blue-100 dark:bg-blue-900/30 border-2 border-blue-500",
+          isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border hover:bg-accent/50 active:scale-95"
+        )}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
+        onClick={onClick}
+      >
+        <Folder className={cn("w-10 h-10 transition-colors", isSelected ? "text-blue-500 fill-blue-500/20" : "text-yellow-500 fill-yellow-500/20")} />
+        <span className="text-xs font-medium text-center truncate w-full px-2">{folder.name}</span>
+        {isSelectionMode && (<div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-background border-2 border-muted-foreground flex items-center justify-center">{isSelected && <div className="w-full h-full bg-blue-500 rounded-full flex items-center justify-center"><Check className="w-3 h-3 text-white"/></div>}</div>)}
+      </div>
+    );
+  }
+
+  const isDragging = activeId !== null;
+
   if (loading) return <Loader2 className="w-6 h-6 animate-spin mx-auto mt-10 text-muted-foreground"/>;
 
   return (
-    <div className="pb-32" onClick={(e) => { if (e.target === e.currentTarget && isSelectionMode) exitSelectionMode(); }}>
-      <header className="flex items-center justify-between mb-6 py-4">
-        <h1 className="text-2xl font-bold flex items-center gap-2">我的文件夹 <span className="text-xs font-normal text-muted-foreground bg-accent px-2 py-1 rounded-full">{folders.length}</span></h1>
-        <div className="flex gap-2">
-            {isSelectionMode ? <button onClick={exitSelectionMode} className="text-sm text-muted-foreground">取消</button> : <Button size="sm" onClick={handleCreateFolder} variant="outline"><Plus className="w-4 h-4 mr-1"/> 新建</Button>}
-        </div>
-      </header>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="pb-32" onClick={(e) => { if (e.target === e.currentTarget && isSelectionMode) exitSelectionMode(); }}>
+        <header className="flex items-center justify-between mb-6 py-4">
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate flex-1 min-w-0">
+            <span className="truncate">我的文件夹</span>
+            <span className="text-xs font-normal text-muted-foreground bg-accent px-2 py-1 rounded-full shrink-0 hidden sm:inline">{folders.length}</span>
+          </h1>
+          <div className="flex gap-2 shrink-0">
+              {isSelectionMode ? (
+                <>
+                  <button onClick={exitSelectionMode} className="text-sm text-muted-foreground sm:inline hidden">取消</button>
+                  <Button variant="ghost" size="icon" onClick={exitSelectionMode} className="sm:hidden">
+                    <X className="w-4 h-4" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" onClick={handleCreateFolder} variant="outline" className="sm:inline hidden">
+                    <Plus className="w-4 h-4 sm:mr-1"/>
+                    <span className="sm:inline hidden">新建</span>
+                  </Button>
+                  <Button size="icon" onClick={handleCreateFolder} variant="outline" className="sm:hidden">
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </>
+              )}
+          </div>
+        </header>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-        {folders.map((folder) => {
-          const isSelected = selectedIds.has(folder.id);
-          return (
-            <div key={folder.id} className={cn("relative aspect-square rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all select-none cursor-pointer group", isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border hover:bg-accent/50 active:scale-95")} onTouchStart={() => handleTouchStart(folder.id)} onTouchEnd={handleTouchEnd} onMouseDown={() => handleTouchStart(folder.id)} onMouseUp={handleTouchEnd} onClick={() => handleClick(folder)}>
-                <Folder className={cn("w-10 h-10 transition-colors", isSelected ? "text-blue-500 fill-blue-500/20" : "text-yellow-500 fill-yellow-500/20")} />
-                <span className="text-xs font-medium text-center truncate w-full px-2">{folder.name}</span>
-                {isSelectionMode && (<div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-background border-2 border-muted-foreground flex items-center justify-center">{isSelected && <div className="w-full h-full bg-blue-500 rounded-full flex items-center justify-center"><Check className="w-3 h-3 text-white"/></div>}</div>)}
-            </div>
-          );
-        })}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+          {folders.map((folder) => {
+            const isSelected = selectedIds.has(folder.id);
+            const isActive = activeId === folder.id;
+            // 如果正在拖拽这个文件夹，使用可拖拽组件；否则使用可放置组件
+            if (isActive) {
+              return (
+                <DraggableFolderCard
+                  key={folder.id}
+                  folder={folder}
+                  isSelected={isSelected}
+                  isSelectionMode={isSelectionMode}
+                  onClick={() => handleClick(folder)}
+                  onTouchStart={() => handleTouchStart(folder.id)}
+                  onTouchEnd={handleTouchEnd}
+                  onMouseDown={() => handleTouchStart(folder.id)}
+                  onMouseUp={handleTouchEnd}
+                />
+              );
+            } else {
+              return (
+                <DroppableFolderCard
+                  key={folder.id}
+                  folder={folder}
+                  isSelected={isSelected}
+                  isSelectionMode={isSelectionMode}
+                  onClick={() => handleClick(folder)}
+                  onTouchStart={() => handleTouchStart(folder.id)}
+                  onTouchEnd={handleTouchEnd}
+                  onMouseDown={() => handleTouchStart(folder.id)}
+                  onMouseUp={handleTouchEnd}
+                  activeId={activeId}
+                />
+              );
+            }
+          })}
+        </div>
+        {/* 底部数量显示：移动端显示，桌面端隐藏（已在 header 显示） */}
+        <div className="shrink-0 px-4 py-2 text-center border-t border-border/40 sm:hidden">
+          <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">{folders.length} 文件夹</span>
+        </div>
       </div>
 
-      <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
+      <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
         <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
             <button onClick={(e) => { e.stopPropagation(); exitSelectionMode(); }} className="absolute -top-3 -right-3 w-6 h-6 bg-muted rounded-full flex items-center justify-center border border-border shadow-md"><X className="w-3 h-3" /></button>
             
@@ -347,6 +542,15 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      <DragOverlay>
+        {activeId ? (
+          <div className="w-32 h-32 bg-accent/90 backdrop-blur border border-blue-500 rounded-2xl shadow-2xl p-4 flex flex-col justify-center items-center rotate-3">
+            <Folder className="w-10 h-10 text-blue-500 fill-blue-500/20 mb-2" />
+            <span className="text-xs font-bold">移动中...</span>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

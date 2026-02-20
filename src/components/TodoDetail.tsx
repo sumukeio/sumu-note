@@ -942,7 +942,7 @@ export default function TodoDetail({
         </div>
 
         {/* 底部操作栏：移动端纵向排列并留出安全区 */}
-        <div className="flex flex-col-reverse gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 sm:gap-2 border-t border-border shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
+        <div className="flex flex-col-reverse gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 sm:gap-2 border-t border-border shrink-0 sm:pb-4" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom) + var(--vv-bottom-inset, 0px))' }}>
           <Button
             variant="destructive"
             onClick={handleDelete}

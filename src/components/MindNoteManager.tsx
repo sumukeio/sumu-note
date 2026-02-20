@@ -827,11 +827,12 @@ export default function MindNoteManager({
         {/* Dock 工具栏 */}
         <div
           className={cn(
-            "fixed left-0 right-0 bottom-8 flex justify-center z-50 transition-all duration-300",
+            "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300",
             isSelectionMode
               ? "translate-y-0 opacity-100"
               : "translate-y-20 opacity-0 pointer-events-none"
           )}
+          style={{ bottom: 'calc(2rem + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))' }}
         >
           <div className="relative bg-background/90 backdrop-blur-md border border-border px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-8">
             <button

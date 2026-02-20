@@ -465,8 +465,11 @@ export default function TodoManager({ userId }: TodoManagerProps) {
             <>
               {/* 列表区域：移动端底部留出固定添加栏+安全区高度 */}
               <div
-                className="flex-1 min-h-0 overflow-auto overflow-x-hidden overscroll-contain pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0"
-                style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                className="flex-1 min-h-0 overflow-auto overflow-x-hidden overscroll-contain md:pb-0"
+                style={{ 
+                  paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))',
+                  WebkitOverflowScrolling: "touch" 
+                } as React.CSSProperties}
               >
                 <TodoListView
                   userId={userId}
@@ -491,6 +494,7 @@ export default function TodoManager({ userId }: TodoManagerProps) {
                   "shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                   "fixed bottom-0 left-0 right-0 z-20 pb-[env(safe-area-inset-bottom)] md:relative md:bottom-auto md:left-auto md:right-auto md:pb-0"
                 )}
+                style={{ bottom: 'calc(0px + var(--vv-bottom-inset, 0px))' } as React.CSSProperties}
               >
                 <QuickAddTodo
                   userId={userId}

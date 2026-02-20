@@ -128,6 +128,7 @@ Vercel 在创建部署时，会检查 Git 提交的作者（Git author）是否�
 - [Vercel 文档 - Git Integration](https://vercel.com/docs/concepts/git)
 - [Vercel 文档 - Team Management](https://vercel.com/docs/teams)
 - [Vercel CLI 文档](https://vercel.com/docs/cli)
+- [Git Push 故障排除指南](./GIT_PUSH_TROUBLESHOOTING.md)
 
 ---
 

@@ -58,6 +58,9 @@ export default function SegmentedEditor({
   const activeTextareaIndexRef = useRef<number | null>(null);
   const segmentsLengthRef = useRef(0); // 跟踪 segments 长度，避免无限循环
   const hasRestoredRef = useRef(false); // 跟踪是否已恢复光标位置，避免重复恢复
+  const lastInputTimeRef = useRef<number>(0); // 记录最后一次输入的时间
+  const restoreCursorTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 光标恢复的防抖定时器
+  const isTypingRef = useRef<boolean>(false); // 标记是否正在输入
   
   // 浮动工具栏相关状态
   const [selectedText, setSelectedText] = useState("");
@@ -417,15 +420,27 @@ export default function SegmentedEditor({
         // 使用 setTimeout 确保在下一个事件循环中更新，避免在渲染期间更新父组件
         setTimeout(() => {
           onChange(markdown);
-          // 更新后恢复光标位置（延迟执行，避免在 onChange 中触发）
-          setTimeout(() => {
-            restoreCursorPosition();
-          }, 10);
+          // 只在非输入状态下恢复光标位置（避免快速输入时频繁恢复导致抖动）
+          // 如果正在输入，延迟恢复，等待输入停止
+          if (!isTypingRef.current) {
+            // 清除之前的恢复定时器
+            if (restoreCursorTimeoutRef.current) {
+              clearTimeout(restoreCursorTimeoutRef.current);
+            }
+            restoreCursorTimeoutRef.current = setTimeout(() => {
+              restoreCursorPosition();
+            }, 50);
+          }
         }, 0);
       }
     }, 50); // 每 50ms 检查一次
     
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      if (restoreCursorTimeoutRef.current) {
+        clearTimeout(restoreCursorTimeoutRef.current);
+      }
+    };
   }, [onChange, restoreCursorPosition]);
   
   // 当 segments 更新后，恢复光标位置（使用 ref 跟踪，避免无限循环）
@@ -437,15 +452,24 @@ export default function SegmentedEditor({
     }
     
     // 只在 segments 长度变化时恢复光标位置（避免内容变化时频繁恢复）
-    if (segments.length !== segmentsLengthRef.current && savedCursorStateRef.current && !hasRestoredRef.current) {
+    // 并且只在非输入状态下恢复（避免快速输入时抖动）
+    if (segments.length !== segmentsLengthRef.current && savedCursorStateRef.current && !hasRestoredRef.current && !isTypingRef.current) {
       segmentsLengthRef.current = segments.length;
       hasRestoredRef.current = true;
+      // 清除之前的恢复定时器
+      if (restoreCursorTimeoutRef.current) {
+        clearTimeout(restoreCursorTimeoutRef.current);
+      }
       // 延迟恢复，确保 DOM 已更新
-      const timer = setTimeout(() => {
+      restoreCursorTimeoutRef.current = setTimeout(() => {
         restoreCursorPosition();
         hasRestoredRef.current = false;
       }, 50);
-      return () => clearTimeout(timer);
+      return () => {
+        if (restoreCursorTimeoutRef.current) {
+          clearTimeout(restoreCursorTimeoutRef.current);
+        }
+      };
     }
     // 更新长度引用
     if (segments.length !== segmentsLengthRef.current) {
@@ -457,14 +481,24 @@ export default function SegmentedEditor({
   // 更新文本段
   const updateTextSegment = useCallback(
     (index: number, newContent: string, textarea: HTMLTextAreaElement) => {
-      // 保存光标位置和滚动位置
+      // 标记正在输入
+      isTypingRef.current = true;
+      lastInputTimeRef.current = Date.now();
+      
+      // 保存光标位置和滚动位置（使用最新的光标位置）
+      const currentCursorPos = textarea.selectionStart ?? 0;
       savedCursorStateRef.current = {
         segmentIndex: index,
-        cursorPosition: textarea.selectionStart ?? 0,
+        cursorPosition: currentCursorPos,
         scrollTop: textarea.scrollTop,
         scrollLeft: textarea.scrollLeft,
       };
       activeTextareaIndexRef.current = index;
+      
+      // 清除之前的恢复定时器
+      if (restoreCursorTimeoutRef.current) {
+        clearTimeout(restoreCursorTimeoutRef.current);
+      }
       
       setSegments((prevSegments) => {
         const newSegments = [...prevSegments];
@@ -475,8 +509,23 @@ export default function SegmentedEditor({
         }
         return newSegments;
       });
+      
+      // 在输入停止后（300ms 无输入）标记为非输入状态，并恢复光标
+      setTimeout(() => {
+        const timeSinceLastInput = Date.now() - lastInputTimeRef.current;
+        if (timeSinceLastInput >= 300) {
+          isTypingRef.current = false;
+          // 延迟恢复光标，确保 DOM 已更新
+          if (restoreCursorTimeoutRef.current) {
+            clearTimeout(restoreCursorTimeoutRef.current);
+          }
+          restoreCursorTimeoutRef.current = setTimeout(() => {
+            restoreCursorPosition();
+          }, 50);
+        }
+      }, 300);
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, restoreCursorPosition]
   );
 
   // 格式化文本
@@ -981,8 +1030,18 @@ export default function SegmentedEditor({
               }}
               value={segment.content}
               onChange={(e) => {
-                updateTextSegment(segmentIndex, e.target.value, e.currentTarget);
-                autoResizeTextarea(e.currentTarget);
+                const textarea = e.currentTarget;
+                // 在更新前立即保存当前光标位置（确保获取到最新的光标位置）
+                const currentCursorPos = textarea.selectionStart ?? 0;
+                // 更新内容
+                updateTextSegment(segmentIndex, textarea.value, textarea);
+                autoResizeTextarea(textarea);
+                // 在下一个事件循环中恢复光标位置（避免被 React 的重渲染重置）
+                requestAnimationFrame(() => {
+                  if (textarea && currentCursorPos <= textarea.value.length) {
+                    textarea.setSelectionRange(currentCursorPos, currentCursorPos);
+                  }
+                });
               }}
               onSelect={(e) => {
                 // 保存选择位置

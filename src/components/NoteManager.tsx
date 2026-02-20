@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { 
   Copy, Trash2, FolderInput, X, Check, Loader2, Plus, 
   FileText, ArrowLeft, CheckCircle2, Pencil, Eye, PenLine, 
-  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical, WifiOff, Wifi, History, Table, Rows, Columns, AlignLeft
+  Search, RotateCcw, Pin, Image as ImageIcon, Globe, Maximize2, Minimize2, MoreVertical, WifiOff, Wifi, History, Table, Rows, Columns, AlignLeft, Folder
 } from "lucide-react"; 
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -35,13 +35,14 @@ interface NoteManagerProps {
   folderId: string;
   folderName: string;
   onBack: () => void;
+  onEnterFolder?: (folderId: string, folderName: string) => void; // 进入子文件夹的回调
   initialNoteId?: string | null; // 初始要打开的笔记 ID（用于从搜索结果跳转）
 }
 
 type SaveStatus = 'saved' | 'saving' | 'error' | 'unsaved';
 
 // --- 拖拽卡片组件 ---
-function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouchStart, onTouchEnd, onTouchMove, onMouseDown, onMouseUp }: any) {
+function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouchStart, onTouchEnd, onTouchMove, onMouseDown, onMouseUp, onMouseMove }: any) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: note.id,
         data: note,
@@ -51,7 +52,26 @@ function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouch
     const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0 : 1 };
     
     return (
-        <div ref={setNodeRef} style={style} {...listeners} {...attributes}
+        <div 
+            ref={setNodeRef} 
+            style={style}
+            // 完全禁用拖拽库的触摸事件，只保留鼠标事件用于桌面端拖拽
+            {...(isSelectionMode ? {} : {
+                ...attributes,
+                // 只应用鼠标相关的拖拽事件，不应用触摸事件
+                onMouseDown: (e: React.MouseEvent) => {
+                  onMouseDown?.(e);
+                  listeners?.onMouseDown?.(e as any);
+                },
+                onMouseMove: (e: React.MouseEvent) => {
+                  onMouseMove?.(e);
+                  listeners?.onMouseMove?.(e as any);
+                },
+                onMouseUp: (e: React.MouseEvent) => {
+                  onMouseUp?.(e);
+                  listeners?.onMouseUp?.(e as any);
+                },
+            })}
             className={cn(
                 // 允许纵向滚动手势（避免滑动时被当作点击/选中）
                 "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y", 
@@ -59,11 +79,26 @@ function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouch
                 note.is_deleted && "opacity-70 grayscale border-dashed",
                 note.is_pinned && !note.is_deleted && "border-l-4 border-l-yellow-500 bg-yellow-500/5"
             )}
-            onTouchStart={onTouchStart} 
-            onTouchEnd={onTouchEnd} 
-            onTouchMove={onTouchMove}
-            onMouseDown={onMouseDown} 
-            onMouseUp={onMouseUp} 
+            onTouchStart={(e: React.TouchEvent) => {
+                e.stopPropagation();
+                e.preventDefault(); // 完全阻止拖拽库的触摸事件
+                // 触摸事件优先处理长按选择
+                if (onTouchStart) {
+                    onTouchStart(e);
+                }
+            }} 
+            onTouchEnd={(e: React.TouchEvent) => {
+                e.stopPropagation();
+                if (onTouchEnd) {
+                    onTouchEnd(e);
+                }
+            }} 
+            onTouchMove={(e: React.TouchEvent) => {
+                e.stopPropagation();
+                if (onTouchMove) {
+                    onTouchMove(e);
+                }
+            }}
             onClick={onClick}
         >
             <div>
@@ -131,10 +166,11 @@ function DroppableDockItem({ id, icon: Icon, label, disabled, onClick, variant =
 }
 
 // --- 主组件 ---
-export default function NoteManager({ userId, folderId, folderName, onBack, initialNoteId }: NoteManagerProps) {
+export default function NoteManager({ userId, folderId, folderName, onBack, onEnterFolder, initialNoteId }: NoteManagerProps) {
   const { toast } = useToast();
   const [view, setView] = useState<'list' | 'editor'>('list');
   const [notes, setNotes] = useState<any[]>([]);
+  const [subFolders, setSubFolders] = useState<any[]>([]); // 子文件夹列表
   const [loading, setLoading] = useState(true);
   
   // 编辑器状态
@@ -161,6 +197,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
   const [renameNoteId, setRenameNoteId] = useState<string | null>(null); // 待重命名的笔记ID
   const [renameInput, setRenameInput] = useState(""); // 重命名输入框
   const [deleteNoteId, setDeleteNoteId] = useState<string | null>(null); // 待删除的笔记ID
+  const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false); // 新建文件夹对话框
+  const [folderNameInput, setFolderNameInput] = useState(""); // 文件夹名称输入框
   const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳（服务器返回）
   const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
   const isSavingRef = useRef<boolean>(false); // 标记是否正在保存（用于忽略自己的更新事件）
@@ -218,13 +256,19 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const isSelectionMode = selectedIds.size > 0;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const mouseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const ignoreClickRef = useRef(false);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const mouseStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const ignoreTapOnceRef = useRef(false);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 10 } }), useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }));
+  // 拖拽传感器配置：延迟激活，给长按选择留出时间（500ms）
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 10 } }), 
+    useSensor(TouchSensor, { activationConstraint: { delay: 600, tolerance: 8 } }) // 延迟600ms，确保长按选择（500ms）优先
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -329,7 +373,26 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
       setSelectedIds(new Set());
   };
 
-  useEffect(() => { if (userId && folderId && view === 'list') fetchNotes(); }, [userId, folderId, view, showTrash]);
+  // 获取子文件夹
+  const fetchSubFolders = async () => {
+    if (showTrash) {
+      setSubFolders([]);
+      return;
+    }
+    const { data } = await supabase
+      .from('folders')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('parent_id', folderId)
+      .order('created_at', { ascending: false });
+    if (data) setSubFolders(data);
+  };
+
+  useEffect(() => { 
+    if (userId && folderId && view === 'list') {
+      Promise.all([fetchNotes(), fetchSubFolders()]);
+    }
+  }, [userId, folderId, view, showTrash]);
 
   // 跟踪是否已经处理过 initialNoteId，避免重复处理和无限循环
   const processedInitialNoteIdRef = useRef<string | null>(null);
@@ -419,6 +482,13 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
         noteTags.some((t) => t.includes(q))
       );
   });
+
+  // 过滤子文件夹（根据搜索查询）
+  const filteredSubFolders = subFolders.filter(folder => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (folder.name?.toLowerCase() || "").includes(q);
+  });
   
   // --- 编辑器操作 ---
   const enterEditor = (note: any) => { 
@@ -457,6 +527,39 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
   };
 
   const handleAddNote = async () => { const { data } = await supabase.from('notes').insert({ user_id: userId, folder_id: folderId, title: "", content: "" }).select().single(); if (data) enterEditor(data); };
+  
+  const handleAddFolder = () => {
+    setFolderNameInput("");
+    setCreateFolderDialogOpen(true);
+  };
+
+  const handleCreateFolder = async () => {
+    const name = folderNameInput.trim();
+    if (!name) return;
+    
+    const { error } = await supabase
+      .from("folders")
+      .insert({ user_id: userId, name, parent_id: folderId });
+    
+    if (!error) {
+      setCreateFolderDialogOpen(false);
+      setFolderNameInput("");
+      toast({
+        title: "创建成功",
+        description: "文件夹已创建",
+        variant: "default",
+      });
+      // 刷新笔记列表和子文件夹列表
+      fetchNotes();
+      fetchSubFolders();
+    } else {
+      toast({
+        title: "创建失败",
+        description: error.message || "创建文件夹时出错",
+        variant: "destructive",
+      });
+    }
+  };
   
   const saveNote = useCallback(async (currentTitle: string, currentContent: string, pinned: boolean, published: boolean, currentTags: string[], showToast: boolean = false) => { 
       if (!currentNote) return; 
@@ -747,57 +850,54 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
     }
     
     // 恢复容器滚动位置（移动端键盘弹出可能导致滚动位置重置）
+    // 注意：只在用户已经滚动过的情况下恢复，避免初始化时跳转
     const restoreScroll = () => {
-      if (editorScrollContainerRef.current && savedScrollTopRef.current !== null) {
+      if (editorScrollContainerRef.current && savedScrollTopRef.current !== null && savedScrollTopRef.current > 0) {
         editorScrollContainerRef.current.scrollTop = savedScrollTopRef.current;
       }
     };
     
-    // 立即恢复
-    restoreScroll();
-    
-    // 使用 requestAnimationFrame 确保在 DOM 更新后恢复
+    // 延迟恢复，确保 DOM 更新完成
+    // 使用多个延迟确保在不同情况下都能恢复
     requestAnimationFrame(() => {
       restoreScroll();
-      requestAnimationFrame(restoreScroll);
+      requestAnimationFrame(() => {
+        restoreScroll();
+        // 移动端键盘弹出后延迟恢复
+        setTimeout(restoreScroll, 100);
+        setTimeout(restoreScroll, 300);
+      });
     });
-    
-    // 移动端键盘弹出后延迟恢复
-    setTimeout(restoreScroll, 50);
-    setTimeout(restoreScroll, 200);
   }, [title, handleContentChange]);
 
   // 编辑后恢复滚动位置（解决手机端编辑后自动回到顶部）
+  // 注意：只在进入编辑器视图时恢复，不在内容变化时恢复（避免每次输入都跳转）
   useEffect(() => {
-    if (view !== "editor" || !content) return;
+    if (view !== "editor") return;
     const container = editorScrollContainerRef.current;
     if (!container) return;
     const saved = savedScrollTopRef.current;
     
-    // 只在有保存的滚动位置时才恢复（避免初始化时滚动到顶部）
+    // 只在有保存的滚动位置且大于0时才恢复（避免初始化时滚动到顶部）
     if (saved === null || saved === 0) return;
     
+    // 延迟恢复，确保 DOM 已更新
     const restore = () => {
-      if (editorScrollContainerRef.current && savedScrollTopRef.current !== null) {
+      if (editorScrollContainerRef.current && savedScrollTopRef.current !== null && savedScrollTopRef.current > 0) {
         editorScrollContainerRef.current.scrollTop = savedScrollTopRef.current;
       }
     };
     
-    restore();
+    // 只在视图切换时恢复一次，使用多个延迟确保恢复成功
     requestAnimationFrame(() => {
       restore();
-      requestAnimationFrame(restore);
+      requestAnimationFrame(() => {
+        restore();
+        // 移动端键盘/布局稳定后再恢复一次
+        setTimeout(restore, 200);
+      });
     });
-    // 移动端键盘/布局稳定后再恢复一次，避免被重置
-    const t1 = setTimeout(restore, 50);
-    const t2 = setTimeout(restore, 200);
-    const t3 = setTimeout(restore, 500); // 增加一个更长的延迟，处理键盘完全弹出后的情况
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [content, view]);
+  }, [view]); // 只在 view 变化时触发，不在 content 变化时触发
 
   // 基于当前文件夹里的 notes 做候选（MVP）
   const linkCandidates = notes
@@ -1570,6 +1670,45 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
     }
     touchStartPosRef.current = null;
   };
+
+  // 桌面端：鼠标长按选择（按住 500ms 进入选择模式；拖动超过阈值则取消）
+  const handleMouseDown = (id: string, e: React.MouseEvent) => {
+    if (isSelectionMode) return;
+    ignoreClickRef.current = false;
+    ignoreTapOnceRef.current = false;
+    mouseStartPosRef.current = { x: e.clientX, y: e.clientY };
+    if (mouseTimerRef.current) {
+      clearTimeout(mouseTimerRef.current);
+      mouseTimerRef.current = null;
+    }
+    mouseTimerRef.current = setTimeout(() => {
+      const newSet = new Set(selectedIds);
+      newSet.add(id);
+      setSelectedIds(newSet);
+      ignoreClickRef.current = true; // 让接下来的 click 被忽略（避免直接打开）
+    }, 500);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const start = mouseStartPosRef.current;
+    if (!start || !mouseTimerRef.current) return;
+    const dx = Math.abs(e.clientX - start.x);
+    const dy = Math.abs(e.clientY - start.y);
+    if (dx > 6 || dy > 6) {
+      // 用户在拖动：取消长按选择，避免误触
+      ignoreTapOnceRef.current = true;
+      clearTimeout(mouseTimerRef.current);
+      mouseTimerRef.current = null;
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (mouseTimerRef.current) {
+      clearTimeout(mouseTimerRef.current);
+      mouseTimerRef.current = null;
+    }
+    mouseStartPosRef.current = null;
+  };
   const exitSelectionMode = () => setSelectedIds(new Set());
   const handleListClick = (note: any) => {
     // 滑动后的 click/tap 直接忽略一次（移动端防误触）
@@ -1587,27 +1726,67 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
       enterEditor(note);
     }
   };
+  
+  const handleFolderClick = (folder: any) => {
+    // 滑动后的 click/tap 直接忽略一次（移动端防误触）
+    if (ignoreTapOnceRef.current) {
+      ignoreTapOnceRef.current = false;
+      return;
+    }
+    if (ignoreClickRef.current) {
+      ignoreClickRef.current = false;
+      return;
+    }
+    if (isSelectionMode) {
+      toggleSelection(folder.id);
+    } else if (onEnterFolder) {
+      onEnterFolder(folder.id, folder.name);
+    }
+  };
   const handleDelete = async () => {
     const ids = Array.from(selectedIds);
+    // 分离文件夹ID和笔记ID
+    const folderIds = ids.filter(id => subFolders.some(f => f.id === id));
+    const noteIds = ids.filter(id => notes.some(n => n.id === id));
+    
     if (showTrash) {
       // 回收站：永久删除，需要确认
       setBatchDeleteDialogOpen(true);
     } else {
-      // 普通删除：移入回收站，直接执行
-      const { error } = await supabase.from('notes').update({ is_deleted: true }).in('id', ids);
-      if (!error) {
-        setNotes(prev => prev.filter(n => !selectedIds.has(n.id)));
+      // 删除文件夹
+      if (folderIds.length > 0) {
+        const { error: folderError } = await supabase.from('folders').delete().in('id', folderIds);
+        if (folderError) {
+          toast({
+            title: "删除失败",
+            description: folderError.message || "删除文件夹时出错",
+            variant: "destructive",
+          });
+          return;
+        }
+        setSubFolders(prev => prev.filter(f => !folderIds.includes(f.id)));
+      }
+      
+      // 删除笔记：移入回收站
+      if (noteIds.length > 0) {
+        const { error: noteError } = await supabase.from('notes').update({ is_deleted: true }).in('id', noteIds);
+        if (noteError) {
+          toast({
+            title: "删除失败",
+            description: noteError.message || "删除笔记时出错",
+            variant: "destructive",
+          });
+          return;
+        }
+        setNotes(prev => prev.filter(n => !noteIds.includes(n.id)));
+      }
+      
+      if (folderIds.length > 0 || noteIds.length > 0) {
         exitSelectionMode();
         toast({
-          title: "已移入回收站",
-          description: `${ids.length} 个笔记已移入回收站`,
+          title: "删除成功",
+          description: `${folderIds.length > 0 ? `${folderIds.length} 个文件夹已删除，` : ''}${noteIds.length > 0 ? `${noteIds.length} 个笔记已移入回收站` : ''}`,
           variant: "default",
-        });
-      } else {
-        toast({
-          title: "删除失败",
-          description: error.message || "删除笔记时出错",
-          variant: "destructive",
         });
       }
     }
@@ -1656,7 +1835,9 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
 
   const handleCopy = () => {
     if (selectedIds.size > 1) return;
-    const note = notes.find(n => n.id === Array.from(selectedIds)[0]);
+    const id = Array.from(selectedIds)[0];
+    const note = notes.find(n => n.id === id);
+    // 文件夹不支持复制内容
     if (note) {
       navigator.clipboard.writeText(note.content || "");
       toast({
@@ -1665,16 +1846,32 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
         variant: "success",
       });
       exitSelectionMode();
+    } else {
+      toast({
+        title: "无法复制",
+        description: "文件夹不支持复制操作",
+        variant: "default",
+      });
     }
   };
   const handleRename = () => {
     if (selectedIds.size !== 1) return;
     const id = Array.from(selectedIds)[0];
+    // 检查是文件夹还是笔记
+    const folder = subFolders.find(f => f.id === id);
     const note = notes.find(n => n.id === id);
-    if (!note) return;
-    setRenameNoteId(id);
-    setRenameInput(note.title || "");
-    setRenameDialogOpen(true);
+    
+    if (folder) {
+      // 重命名文件夹
+      setRenameNoteId(id);
+      setRenameInput(folder.name || "");
+      setRenameDialogOpen(true);
+    } else if (note) {
+      // 重命名笔记
+      setRenameNoteId(id);
+      setRenameInput(note.title || "");
+      setRenameDialogOpen(true);
+    }
   };
 
   const confirmRename = async () => {
@@ -1682,40 +1879,86 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
       setRenameDialogOpen(false);
       return;
     }
+    
+    // 检查是文件夹还是笔记
+    const folder = subFolders.find(f => f.id === renameNoteId);
     const note = notes.find(n => n.id === renameNoteId);
-    if (!note || renameInput.trim() === note.title) {
-      setRenameDialogOpen(false);
-      return;
-    }
-    const { error } = await supabase.from('notes').update({ title: renameInput.trim() }).eq('id', renameNoteId);
-    if (!error) {
-      toast({
-        title: "重命名成功",
-        description: "笔记标题已更新",
-        variant: "success",
-      });
-      fetchNotes();
-      exitSelectionMode();
-    } else {
-      toast({
-        title: "重命名失败",
-        description: error.message || "更新笔记标题时出错",
-        variant: "destructive",
-      });
+    
+    if (folder) {
+      // 重命名文件夹
+      if (renameInput.trim() === folder.name) {
+        setRenameDialogOpen(false);
+        setRenameNoteId(null);
+        setRenameInput("");
+        return;
+      }
+      const { error } = await supabase
+        .from('folders')
+        .update({ name: renameInput.trim() })
+        .eq('id', renameNoteId);
+      if (!error) {
+        setSubFolders(prev => prev.map(f => f.id === renameNoteId ? { ...f, name: renameInput.trim() } : f));
+        toast({
+          title: "重命名成功",
+          description: "文件夹名称已更新",
+          variant: "success",
+        });
+        fetchSubFolders();
+        exitSelectionMode();
+      } else {
+        toast({
+          title: "重命名失败",
+          description: error.message || "更新文件夹名称时出错",
+          variant: "destructive",
+        });
+      }
+    } else if (note) {
+      // 重命名笔记
+      if (renameInput.trim() === note.title) {
+        setRenameDialogOpen(false);
+        setRenameNoteId(null);
+        setRenameInput("");
+        return;
+      }
+      const { error } = await supabase.from('notes').update({ title: renameInput.trim() }).eq('id', renameNoteId);
+      if (!error) {
+        toast({
+          title: "重命名成功",
+          description: "笔记标题已更新",
+          variant: "success",
+        });
+        fetchNotes();
+        exitSelectionMode();
+      } else {
+        toast({
+          title: "重命名失败",
+          description: error.message || "更新笔记标题时出错",
+          variant: "destructive",
+        });
+      }
     }
     setRenameDialogOpen(false);
     setRenameNoteId(null);
     setRenameInput("");
   };
   
-  // 🔥 批量置顶逻辑
+  // 🔥 批量置顶逻辑（仅对笔记有效）
   const handlePin = async () => {
-      const ids = Array.from(selectedIds);
+      // 只处理笔记，过滤掉文件夹
+      const noteIds = Array.from(selectedIds).filter(id => notes.some(n => n.id === id));
+      if (noteIds.length === 0) {
+        toast({
+          title: "无法置顶",
+          description: "文件夹不支持置顶操作",
+          variant: "default",
+        });
+        return;
+      }
       // 智能判断：如果选中的全都是已置顶，则全部取消；否则全部置顶
-      const allPinned = notes.filter(n => selectedIds.has(n.id)).every(n => n.is_pinned);
+      const allPinned = notes.filter(n => noteIds.includes(n.id)).every(n => n.is_pinned);
       const newStatus = !allPinned;
 
-      const { error } = await supabase.from('notes').update({ is_pinned: newStatus }).in('id', ids);
+      const { error } = await supabase.from('notes').update({ is_pinned: newStatus }).in('id', noteIds);
       if (!error) {
           fetchNotes(); // 刷新数据以更新排序
           exitSelectionMode();
@@ -1742,11 +1985,18 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
       return (
         <>
           {/* 过渡动画优化：页面切换 - 进入编辑页：淡入 + 上滑，300ms ease-out */}
-          <div className={cn(
-            "fixed inset-0 bg-background z-50 flex flex-col h-[100dvh]",
+          <div
+            className={cn(
+            "fixed left-0 right-0 top-0 bg-background z-50 flex flex-col",
             "animate-in fade-in-0 slide-in-from-bottom-4 duration-300 ease-out",
             zenMode && "bg-background"
-          )}>
+          )}
+            style={{
+              // Follow the *visual* viewport so the editor isn't covered by the on-screen keyboard
+              height: "var(--vvh, 100dvh)",
+              transform: "translateY(var(--vv-offset-top, 0px))",
+            }}
+          >
               <header className={cn(
                 "px-2 sm:px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur shrink-0",
                 zenMode && "bg-background border-b border-border/40"
@@ -2407,16 +2657,28 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
                       <div className="h-20" />
                     </div>
                   ) : (
-                    <div className="relative flex-1 mt-4 min-h-0 flex flex-col">
+                    <div className={cn(
+                      "relative mt-4 flex flex-col",
+                      // 移动端固定高度，桌面端使用 flex-1
+                      typeof window !== 'undefined' && window.innerWidth < 768 
+                        ? "h-[calc(100dvh-14rem)]" // 移动端固定高度（减去 header 和 padding）
+                        : "flex-1 min-h-0" // 桌面端自适应
+                    )}>
                       {/* SegmentedEditor 已内置表格编辑功能，不再需要 TableEditor 对话框 */}
                       
                       {/* 使用 SegmentedEditor：自动将表格显示为可视化表格 */}
                       <div
                         ref={editorScrollContainerRef}
-                        className="flex-1 min-h-0 overflow-y-auto"
+                        className={cn(
+                          "overflow-y-auto",
+                          // 移动端固定高度，桌面端自适应
+                          typeof window !== 'undefined' && window.innerWidth < 768 
+                            ? "h-full" // 移动端占满父容器
+                            : "flex-1 min-h-0" // 桌面端自适应
+                        )}
                         style={{
-                          // 移动端优化：自动调整编辑器位置，避免被键盘遮挡
-                          scrollPaddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+                          // Give extra bottom room for toolbars + safe area + keyboard inset fallback
+                          scrollPaddingBottom: 'calc(120px + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))',
                           WebkitOverflowScrolling: 'touch' as any,
                         } as React.CSSProperties}
                         onScroll={(e) => {
@@ -2522,7 +2784,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
           
           {/* 移动端优化：底部固定工具栏 */}
           {view === 'editor' && (
-            <div className="fixed bottom-0 left-0 right-0 sm:hidden z-50 bg-background/95 backdrop-blur-md border-t border-border shadow-lg safe-area-inset-bottom">
+            <div className="fixed bottom-0 left-0 right-0 sm:hidden z-50 bg-background/95 backdrop-blur-md border-t border-border shadow-lg safe-area-inset-bottom" style={{ bottom: 'calc(0px + var(--vv-bottom-inset, 0px))' }}>
               <div className="flex items-center justify-around px-2 py-2 gap-1" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' }}>
                 {/* 常用功能：保存、预览、专注 */}
                 <button
@@ -2761,14 +3023,50 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
         >
         <header className="shrink-0 bg-background/80 backdrop-blur z-10 border-b border-border/40">
             <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2 min-w-10 min-h-10 touch-manipulation"><ArrowLeft className="w-5 h-5" /></Button>
-                    <h1 className="text-lg font-bold truncate max-w-[120px]">{showTrash ? "回收站" : folderName}</h1>
-                    <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">{notes.length}</span>
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Button variant="ghost" size="icon" onClick={onBack} className="-ml-2 min-w-10 min-h-10 touch-manipulation shrink-0"><ArrowLeft className="w-5 h-5" /></Button>
+                    <h1 className="text-base sm:text-lg font-bold truncate flex-1 min-w-0">{showTrash ? "回收站" : folderName}</h1>
+                    {/* 桌面端显示数量，移动端隐藏（已移到底部） */}
+                    {!showTrash && (
+                      <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full shrink-0 hidden sm:inline">
+                        {subFolders.length > 0 && `${subFolders.length} 文件夹 `}
+                        {notes.length} 笔记
+                      </span>
+                    )}
+                    {showTrash && (
+                      <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full shrink-0 hidden sm:inline">{notes.length}</span>
+                    )}
                 </div>
-                <div className="flex gap-2 items-center">
-                    <Button variant={showTrash ? "destructive" : "ghost"} size="sm" onClick={() => { setShowTrash(!showTrash); setView('list'); }}>{showTrash ? <span className="flex items-center gap-1"><ArrowLeft size={14}/> 返回笔记</span> : <Trash2 size={18} className="text-muted-foreground hover:text-red-500 transition"/>}</Button>
-                    {!showTrash && !isSelectionMode && (<Button size="sm" onClick={handleAddNote} variant="outline"><Plus className="w-4 h-4 mr-1"/> 新笔记</Button>)}
+                <div className="flex gap-2 items-center shrink-0">
+                    {/* 桌面端按钮 */}
+                    <Button variant={showTrash ? "destructive" : "ghost"} size="sm" onClick={() => { setShowTrash(!showTrash); setView('list'); }} className="sm:inline hidden">
+                      {showTrash ? <ArrowLeft size={14}/> : <Trash2 size={18} className="text-muted-foreground hover:text-red-500 transition"/>}
+                      {showTrash && <span className="sm:inline hidden ml-1">返回笔记</span>}
+                    </Button>
+                    {/* 移动端图标按钮 */}
+                    <Button variant={showTrash ? "destructive" : "ghost"} size="icon" onClick={() => { setShowTrash(!showTrash); setView('list'); }} className="sm:hidden">
+                      {showTrash ? <ArrowLeft size={18}/> : <Trash2 size={18} className="text-muted-foreground hover:text-red-500 transition"/>}
+                    </Button>
+                    {!showTrash && !isSelectionMode && (
+                        <>
+                            {/* 桌面端按钮 */}
+                            <Button size="sm" onClick={handleAddFolder} variant="outline" className="sm:inline hidden">
+                              <Folder className="w-4 h-4 sm:mr-1"/>
+                              <span className="sm:inline hidden">新文件夹</span>
+                            </Button>
+                            <Button size="sm" onClick={handleAddNote} variant="outline" className="sm:inline hidden">
+                              <Plus className="w-4 h-4 sm:mr-1"/>
+                              <span className="sm:inline hidden">新笔记</span>
+                            </Button>
+                            {/* 移动端图标按钮 */}
+                            <Button size="icon" onClick={handleAddFolder} variant="outline" className="sm:hidden">
+                              <Folder className="w-4 h-4" />
+                            </Button>
+                            <Button size="icon" onClick={handleAddNote} variant="outline" className="sm:hidden">
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
             <div className="px-4 pb-3"><div className="relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" /><Input placeholder={showTrash ? "搜索回收站..." : "搜索笔记..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-accent/50 border-none h-9"/></div></div>
@@ -2776,7 +3074,99 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
 
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-32" style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-3 p-3 sm:p-4">
-            {filteredNotes.length === 0 && (<div className="col-span-2 text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl flex flex-col items-center gap-2">{searchQuery ? <p>未找到相关笔记</p> : (showTrash ? <p>回收站是空的</p> : <p>这里空空如也</p>)}</div>)}
+            {/* 显示子文件夹 */}
+            {!showTrash && filteredSubFolders.map((folder) => {
+              const isSelected = selectedIds.has(folder.id);
+              return (
+                <div
+                  key={folder.id}
+                  className={cn(
+                    "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y",
+                    isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border hover:bg-accent/50 active:scale-95"
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleFolderClick(folder);
+                  }}
+                  onTouchStart={(e: React.TouchEvent) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleTouchStart(folder.id, e);
+                  }}
+                  onTouchMove={(e: React.TouchEvent) => {
+                    e.stopPropagation();
+                    handleTouchMove(e);
+                  }}
+                  onTouchEnd={(e: React.TouchEvent) => {
+                    e.stopPropagation();
+                    handleTouchEnd();
+                  }}
+                  onMouseDown={(e: React.MouseEvent) => {
+                    // 桌面端也支持长按选择（使用鼠标按下）
+                    if (!isSelectionMode) {
+                      e.stopPropagation();
+                      handleTouchStart(folder.id);
+                    }
+                  }}
+                  onMouseUp={(e: React.MouseEvent) => {
+                    handleTouchEnd();
+                  }}
+                  onMouseLeave={(e: React.MouseEvent) => {
+                    // 鼠标移出时取消长按
+                    if (timerRef.current) {
+                      clearTimeout(timerRef.current);
+                      timerRef.current = null;
+                    }
+                  }}
+                  onMouseDown={(e: React.MouseEvent) => {
+                    // 桌面端也支持长按选择（使用鼠标按下）
+                    if (!isSelectionMode) {
+                      handleTouchStart(folder.id);
+                    }
+                  }}
+                  onMouseUp={(e: React.MouseEvent) => {
+                    handleTouchEnd();
+                  }}
+                  onMouseLeave={(e: React.MouseEvent) => {
+                    // 鼠标移出时取消长按
+                    if (timerRef.current) {
+                      clearTimeout(timerRef.current);
+                      timerRef.current = null;
+                    }
+                  }}
+                >
+                  <div>
+                    <h3 className="font-bold text-sm mb-1 truncate flex items-center gap-1">
+                      <Folder className={cn("w-4 h-4", isSelected ? "text-blue-500 fill-blue-500/20" : "text-yellow-500 fill-yellow-500/20")} />
+                      {folder.name || "无名称"}
+                    </h3>
+                    <p className="text-xs text-muted-foreground line-clamp-2">文件夹</p>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-[10px] text-muted-foreground">{new Date(folder.created_at).toLocaleDateString()}</span>
+                    {isSelectionMode ? (
+                      <div className={cn("w-5 h-5 rounded-full flex items-center justify-center", isSelected ? "bg-blue-500" : "border-2 border-zinc-400")}>
+                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                    ) : (
+                      <Folder className="w-3 h-3 text-muted-foreground/30" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            
+            {/* 显示笔记 */}
+            {filteredNotes.length === 0 && filteredSubFolders.length === 0 && !showTrash && (
+              <div className="col-span-2 text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl flex flex-col items-center gap-2">
+                {searchQuery ? <p>未找到相关内容</p> : <p>这里空空如也</p>}
+              </div>
+            )}
+            {filteredNotes.length === 0 && filteredSubFolders.length === 0 && showTrash && (
+              <div className="col-span-2 text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl flex flex-col items-center gap-2">
+                <p>回收站是空的</p>
+              </div>
+            )}
             {filteredNotes.map((note) => (
               <DraggableNoteCard
                 key={note.id}
@@ -2787,15 +3177,30 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
                 onTouchStart={(e: React.TouchEvent) => handleTouchStart(note.id, e)}
                 onTouchMove={(e: React.TouchEvent) => handleTouchMove(e)}
                 onTouchEnd={handleTouchEnd}
-                // 桌面端不使用“长按选择”（避免影响普通点击体验）
-                onMouseDown={undefined}
-                onMouseUp={undefined}
+                // 桌面端支持鼠标长按选择；拖动会自动取消长按，并交给 dnd-kit 做拖拽
+                onMouseDown={(e: React.MouseEvent) => handleMouseDown(note.id, e)}
+                onMouseMove={(e: React.MouseEvent) => handleMouseMove(e)}
+                onMouseUp={() => handleMouseUp()}
               />
             ))}
         </div>
+        {/* 底部数量显示：移动端显示，桌面端隐藏（已在 header 显示） */}
+        {!showTrash && (
+          <div className="shrink-0 px-4 py-2 text-center border-t border-border/40 sm:hidden">
+            <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">
+              {subFolders.length > 0 && `${subFolders.length} 文件夹 `}
+              {notes.length} 笔记
+            </span>
+          </div>
+        )}
+        {showTrash && (
+          <div className="shrink-0 px-4 py-2 text-center border-t border-border/40 sm:hidden">
+            <span className="text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">{notes.length}</span>
+          </div>
+        )}
         </div>
 
-        <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
+        <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
             <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
                 <button onClick={(e) => { e.stopPropagation(); exitSelectionMode(); }} className="absolute -top-3 -right-3 w-6 h-6 bg-muted rounded-full flex items-center justify-center border border-border shadow-md"><X className="w-3 h-3" /></button>
                 
@@ -2858,6 +3263,48 @@ export default function NoteManager({ userId, folderId, folderName, onBack, init
         </Dialog>
 
         {/* 重命名对话框 */}
+        {/* 新建文件夹对话框 */}
+        <Dialog open={createFolderDialogOpen} onOpenChange={setCreateFolderDialogOpen}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>新建文件夹</DialogTitle>
+              <DialogDescription>
+                在当前文件夹内创建新文件夹
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 pt-2">
+              <Input
+                className="w-full"
+                placeholder="输入文件夹名称"
+                value={folderNameInput}
+                onChange={(e) => setFolderNameInput(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && folderNameInput.trim()) {
+                    handleCreateFolder();
+                  }
+                }}
+              />
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCreateFolderDialogOpen(false)}
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleCreateFolder}
+                  disabled={!folderNameInput.trim()}
+                >
+                  确定
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
           <DialogContent>
             <DialogHeader>
