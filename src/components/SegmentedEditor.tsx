@@ -350,30 +350,38 @@ export default function SegmentedEditor({
     const textarea = textareaRefs.current.get(saved.segmentIndex);
     if (!textarea) return;
     
-    // 恢复滚动位置
-    textarea.scrollTop = saved.scrollTop;
-    textarea.scrollLeft = saved.scrollLeft;
+    const isMobile =
+      typeof navigator !== "undefined" &&
+      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    // 桌面端：恢复滚动位置；移动端交给浏览器处理，避免与虚拟键盘行为冲突
+    if (!isMobile) {
+      textarea.scrollTop = saved.scrollTop;
+      textarea.scrollLeft = saved.scrollLeft;
+    }
     
     // 恢复光标位置
     const restoreCursor = () => {
       if (textarea && saved.cursorPosition <= textarea.value.length) {
         textarea.setSelectionRange(saved.cursorPosition, saved.cursorPosition);
-        // 确保光标在可视区域内
-        const textareaRect = textarea.getBoundingClientRect();
-        const container = textarea.parentElement?.parentElement;
-        if (container) {
-          const containerRect = container.getBoundingClientRect();
-          // 如果光标不在可视区域内，滚动到光标位置
-          if (textarea.scrollTop === saved.scrollTop) {
-            // 计算光标在 textarea 中的位置
-            const textBeforeCursor = textarea.value.substring(0, saved.cursorPosition);
-            const lines = textBeforeCursor.split('\n');
-            const lineHeight = 20; // 估算行高
-            const cursorTop = (lines.length - 1) * lineHeight;
-            
-            // 如果光标在可视区域外，滚动到光标位置
-            if (cursorTop < textarea.scrollTop || cursorTop > textarea.scrollTop + textarea.clientHeight) {
-              textarea.scrollTop = Math.max(0, cursorTop - textarea.clientHeight / 2);
+        // 桌面端：确保光标在可视区域内；移动端由浏览器和键盘控制滚动
+        if (!isMobile) {
+          const textareaRect = textarea.getBoundingClientRect();
+          const container = textarea.parentElement?.parentElement;
+          if (container) {
+            const containerRect = container.getBoundingClientRect();
+            // 如果光标不在可视区域内，滚动到光标位置
+            if (textarea.scrollTop === saved.scrollTop) {
+              // 计算光标在 textarea 中的位置
+              const textBeforeCursor = textarea.value.substring(0, saved.cursorPosition);
+              const lines = textBeforeCursor.split('\n');
+              const lineHeight = 20; // 估算行高
+              const cursorTop = (lines.length - 1) * lineHeight;
+              
+              // 如果光标在可视区域外，滚动到光标位置
+              if (cursorTop < textarea.scrollTop || cursorTop > textarea.scrollTop + textarea.clientHeight) {
+                textarea.scrollTop = Math.max(0, cursorTop - textarea.clientHeight / 2);
+              }
             }
           }
         }
@@ -391,7 +399,7 @@ export default function SegmentedEditor({
       });
     });
     
-    // 移动端键盘弹出后可能需要延迟恢复
+    // 移动端键盘弹出后可能需要延迟恢复光标位置（不强制滚动）
     setTimeout(restoreCursor, 50);
     setTimeout(restoreCursor, 200);
   }, []);
