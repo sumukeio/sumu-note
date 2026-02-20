@@ -163,14 +163,32 @@ function parseDateTime(
   const datePatterns = [
     /(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})[日号]?/, // 2026年2月7日、2026-2-7、2026/2/7、2026.2.7
     /(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})(?![.\d])/, // 2026.2.7 无日号
-    /(\d{1,2})[月\-/.](\d{1,2})(?![.\d])/, // 2.7、2-7、2/7（先匹配，避免 2.7.1 被当成 2.7）
-    /(\d{1,2})[月\-/.](\d{1,2})[日号]?/, // 2月7日、2-7、2/7、2.7
+    /(\d{1,2})[月\-/.](\d{1,2})[日号]/, // 2月7日（优先匹配带"日"的，避免只匹配部分）
+    /(\d{1,2})[月\-/.](\d{1,2})(?![.\d月日号])/, // 2.7、2-7、2/7（避免 2.7.1 被当成 2.7，避免匹配 2月7日）
     /(一|二|三|四|五|六|七|八|九|十|十一|十二)月(\d{1,2})[日号]?/, // 三月十五日
   ];
 
   for (const datePattern of datePatterns) {
     const dateMatch = text.match(datePattern);
     if (dateMatch) {
+      // 检查是否是版本号（如 2.7.1）：如果匹配的是点号分隔的日期，需要检查上下文
+      const matchIndex = dateMatch.index!;
+      const matchEnd = matchIndex + dateMatch[0].length;
+      if (dateMatch[0].includes('.')) {
+        const beforeMatch = text.slice(0, matchIndex);
+        const afterMatch = text.slice(matchEnd);
+        // 如果匹配前有 数字. 格式（版本号的前半部分），且匹配的是 数字.数字 格式，则是版本号
+        if (/\d\.\s*$/.test(beforeMatch) && /^\d+\.\d+$/.test(dateMatch[0])) {
+          // 这是版本号的一部分，不是日期，跳过
+          continue;
+        }
+        // 如果匹配后还有 .数字，也可能是版本号
+        if (/^\.\d/.test(afterMatch)) {
+          // 这是版本号，不是日期，跳过
+          continue;
+        }
+      }
+      
       let year: number, month: number, day: number;
       
       // 处理汉字月份

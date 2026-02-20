@@ -22,6 +22,18 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// Mock localforage
+vi.mock('localforage', () => ({
+  default: {
+    config: vi.fn(() => Promise.resolve(null)),
+    getItem: vi.fn(() => Promise.resolve(null)),
+    setItem: vi.fn(() => Promise.resolve(null)),
+    removeItem: vi.fn(() => Promise.resolve(null)),
+    clear: vi.fn(() => Promise.resolve(null)),
+    keys: vi.fn(() => Promise.resolve([])),
+  },
+}));
+
 // Mock Supabase client
 vi.mock('@/lib/supabase', () => {
   // 通用的 query mock，对所有链式方法返回同一个对象，避免 .order(...).order(...) 类型错误
@@ -35,7 +47,10 @@ vi.mock('@/lib/supabase', () => {
     query.or = vi.fn(() => query);
     query.order = vi.fn(() => query);
     query.in = vi.fn(() => query);
-    query.single = vi.fn();
+    query.is = vi.fn(() => query);
+    query.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
+    // 默认返回空数组，避免组件一直加载
+    query.then = vi.fn((resolve) => resolve({ data: [], error: null }));
     return query;
   };
 

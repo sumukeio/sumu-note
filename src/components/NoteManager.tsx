@@ -3118,22 +3118,6 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
                       timerRef.current = null;
                     }
                   }}
-                  onMouseDown={(e: React.MouseEvent) => {
-                    // 桌面端也支持长按选择（使用鼠标按下）
-                    if (!isSelectionMode) {
-                      handleTouchStart(folder.id);
-                    }
-                  }}
-                  onMouseUp={(e: React.MouseEvent) => {
-                    handleTouchEnd();
-                  }}
-                  onMouseLeave={(e: React.MouseEvent) => {
-                    // 鼠标移出时取消长按
-                    if (timerRef.current) {
-                      clearTimeout(timerRef.current);
-                      timerRef.current = null;
-                    }
-                  }}
                 >
                   <div>
                     <h3 className="font-bold text-sm mb-1 truncate flex items-center gap-1">

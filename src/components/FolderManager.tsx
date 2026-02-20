@@ -274,7 +274,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
       } else {
         toast({
           title: "移动失败",
-          description: error.message || "移动文件夹时出错",
+          description: error?.message || "移动文件夹时出错",
           variant: "destructive",
         });
       }
