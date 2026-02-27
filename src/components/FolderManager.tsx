@@ -295,6 +295,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
         style={style}
         {...listeners}
         {...attributes}
+        data-root-folder-card
         className={cn("relative aspect-square rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all select-none cursor-pointer group", isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border hover:bg-accent/50 active:scale-95")}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
@@ -319,6 +320,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
     return (
       <div
         ref={setNodeRef}
+        data-root-folder-card
         className={cn(
           "relative aspect-square rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all select-none cursor-pointer group",
           isOver && !isDraggingThis && "bg-blue-100 dark:bg-blue-900/30 border-2 border-blue-500",
@@ -343,7 +345,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="pb-32" onClick={(e) => { if (e.target === e.currentTarget && isSelectionMode) exitSelectionMode(); }}>
+      <div className="pb-32">
         <header className="flex items-center justify-between mb-6 py-4">
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate flex-1 min-w-0">
             <span className="truncate">我的文件夹</span>
@@ -371,7 +373,15 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
           </div>
         </header>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+        <div
+          className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4"
+          onClick={(e) => {
+            if (!isSelectionMode) return;
+            const target = e.target as HTMLElement;
+            if (target.closest("[data-root-folder-card]")) return;
+            exitSelectionMode();
+          }}
+        >
           {folders.map((folder) => {
             const isSelected = selectedIds.has(folder.id);
             const isActive = activeId === folder.id;

@@ -4,14 +4,21 @@ import * as React from "react"
 
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast"
 
-const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+const TOAST_LIMIT = 3
+// Toast 从视图移除前的等待时长（ms）
+const TOAST_REMOVE_DELAY = 1000
+// 默认自动关闭时长（ms）
+const TOAST_DEFAULT_DURATION = 5000
 
 type ToasterToast = ToastProps & {
   id: string
   title?: React.ReactNode
   description?: React.ReactNode
   action?: ToastActionElement
+  // 撤销回调：传入后 Toaster 会在 toast 内渲染「撤销」按钮
+  undoAction?: () => void
+  // 自动关闭时长（ms），默认 5000
+  duration?: number
 }
 
 const actionTypes = {
@@ -53,6 +60,8 @@ interface State {
 }
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+// 自动关闭定时器（dismiss 后再等 TOAST_REMOVE_DELAY 才真正移除）
+const autoDismissTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
 const addToRemoveQueue = (toastId: string) => {
   if (toastTimeouts.has(toastId)) {
@@ -68,6 +77,27 @@ const addToRemoveQueue = (toastId: string) => {
   }, TOAST_REMOVE_DELAY)
 
   toastTimeouts.set(toastId, timeout)
+}
+
+const scheduleAutoDismiss = (toastId: string, duration: number) => {
+  // 清除旧的（如果有）
+  const existing = autoDismissTimeouts.get(toastId)
+  if (existing) clearTimeout(existing)
+
+  const t = setTimeout(() => {
+    autoDismissTimeouts.delete(toastId)
+    dispatch({ type: "DISMISS_TOAST", toastId })
+  }, duration)
+
+  autoDismissTimeouts.set(toastId, t)
+}
+
+const cancelAutoDismiss = (toastId: string) => {
+  const t = autoDismissTimeouts.get(toastId)
+  if (t) {
+    clearTimeout(t)
+    autoDismissTimeouts.delete(toastId)
+  }
 }
 
 export const reducer = (state: State, action: Action): State => {
@@ -138,13 +168,17 @@ type Toast = Omit<ToasterToast, "id">
 
 function toast({ ...props }: Toast) {
   const id = genId()
+  const duration = props.duration ?? TOAST_DEFAULT_DURATION
 
   const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",
       toast: { ...props, id },
     })
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
+  const dismiss = () => {
+    cancelAutoDismiss(id)
+    dispatch({ type: "DISMISS_TOAST", toastId: id })
+  }
 
   dispatch({
     type: "ADD_TOAST",
@@ -157,6 +191,11 @@ function toast({ ...props }: Toast) {
       },
     },
   })
+
+  // 安排自动关闭（除非 duration 为 0 或 Infinity，表示不自动关闭）
+  if (duration > 0 && duration !== Infinity) {
+    scheduleAutoDismiss(id, duration)
+  }
 
   return {
     id: id,

@@ -2,7 +2,66 @@
 
 本文档记录项目的重要更新和修复。
 
-## 2025-01-XX（最新）
+## 2026-02-XX（最新）
+
+### ✨ 新功能：Toast + 撤销（Undo）
+
+#### 1. 全局 Toast 撤销基础能力 ✅
+- **统一的撤销交互**：
+  - 为全局 `toast` 能力新增 `undoAction` 与 `duration` 支持（默认 5 秒自动关闭）。
+  - 在 `Toaster` 中，当传入 `undoAction` 时，在右侧渲染「撤销」按钮，点击后执行回调并关闭当前 Toast。
+  - 同时支持最多 3 条 Toast 并行显示，避免重要提示被覆盖。
+- **技术实现**：
+  - `src/components/ui/use-toast.ts`：扩展 `ToasterToast` 类型，新增 `undoAction`、`duration` 字段；增加自动关闭与延迟移除两级定时控制。
+  - `src/components/ui/toaster.tsx`：根据 `undoAction` 动态渲染「撤销」按钮，并与 Radix Toast 行为兼容。
+
+#### 2. 普通笔记（NoteManager）关键操作支持撤销 ✅
+- **移动到其他文件夹**：
+  - 支持同时移动“子文件夹 + 笔记”，并在成功后展示可撤销的 Toast。
+  - Toast 内的撤销会将所有被移动的条目按照原始 `parent_id` / `folder_id` 还原到移动前位置。
+  - 同时记录“上次移动到”目标文件夹，移动对话框支持快捷选择“上次移动到”。
+- **批量删除（列表页 Dock 删除）**：
+  - 删除子文件夹：执行真实删除（`folders.delete`），并在本地记录被删除文件夹快照，撤销时通过 `insert` 重新插入。
+  - 删除笔记：并非直接删除，而是将 `notes.is_deleted=true` 移入回收站，撤销时批量恢复 `is_deleted=false`。
+  - 删除成功后展示带撤销按钮的 Toast，点击后自动还原内容并给出“已撤销删除”的二次提示。
+- **编辑页删除当前笔记**：
+  - 编辑器内“删除当前笔记”仍采用“移入回收站”的软删除策略。
+  - 删除成功 Toast 带有撤销按钮；撤销时仅针对当前笔记执行 `is_deleted=false` 并刷新列表。
+- **新建笔记 / 新建文件夹**：
+  - 新建空白笔记后，立即进入编辑器，同时弹出 Toast；若在有效时间内点击“撤销”，会删除这条空白笔记并返回列表。
+  - 新建文件夹成功后，通过一次查询获取刚创建的文件夹 `id`，Toast 附带撤销回调；撤销将删除该文件夹并刷新子文件夹列表。
+- **回收站“彻底删除”**：
+  - 所有在“回收站视图”中执行的“彻底删除”操作仍为不可撤销（按照产品决定），不提供 Undo 按钮。
+- **文件**：
+  - `src/components/ui/use-toast.ts`
+  - `src/components/ui/toaster.tsx`
+  - `src/components/NoteManager.tsx`
+
+#### 3. 移动端体验优化补充说明 ✅
+- **移动端笔记编辑页（NoteManager）**：
+  - 强化了编辑页滚动恢复逻辑，避免移动端软键盘弹出后频繁“跳顶”。
+  - 列表视图中固定了搜索栏与顶部区域，保证滚动时导航与搜索始终可见。
+- **移动端 Todo 管理**：
+  - 修复了移动端浏览器中 Todo 视图“更多”按钮不弹出的问题，通过 `createPortal` 提升层级并避免被父容器裁剪。
+  - 调整 Todo 详情、筛选、列表视图的栅格与间距，使其在手机上不再“挤在一起”，表单控件尺寸符合触控规范。
+- **仪表盘导航与返回行为**：
+  - Dashboard 顶部左侧 `S` 图标点击行为统一为“回到根文件夹列表，并清空当前搜索”。
+  - 笔记编辑页左上角返回按钮行为恢复为“返回当前文件夹的笔记列表”，而不是跳转到根列表。
+- **文件（节选）**：
+  - `src/app/dashboard/page.tsx`
+  - `src/components/NoteManager.tsx`
+  - `src/components/TodoManager.tsx` 及 Todo 相关子组件（详情、筛选、列表等）
+
+### 📚 文档更新
+
+- ✅ 更新 `docs/changelog/CHANGELOG.md`（本文档），记录 Toast + 撤销能力与移动端体验优化。
+- ✅ 更新 `docs/changelog/DOCUMENTATION_UPDATE.md`，补充本次文档同步项。
+- ✅ 更新 `docs/弹窗替换进度.md`，增加 Toast + Undo 的设计与使用说明。
+- ✅ 更新 `docs/productmanager/PRD_SUMU_NOTE.md` 与 `docs/productmanager/移动端编辑体验优化_PRD.md`，在产品层补充“关键操作支持 Toast + 撤销”的规格描述。
+
+---
+
+## 2025-01-XX（历史）
 
 ### ✨ 新功能
 

@@ -72,6 +72,7 @@ function DraggableNoteCard({ note, isSelected, isSelectionMode, onClick, onTouch
                   listeners?.onMouseUp?.(e as any);
                 },
             })}
+            data-note-card
             className={cn(
                 // 允许纵向滚动手势（避免滑动时被当作点击/选中）
                 "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y", 
@@ -151,7 +152,15 @@ function DroppableDockItem({ id, icon: Icon, label, disabled, onClick, variant =
     const isPinnedStyle = variant === "pinned"; // 🔥 特殊样式
 
     return (
-        <div ref={setNodeRef} className={cn("flex flex-col items-center gap-1 transition-all", disabled ? "opacity-30 grayscale cursor-not-allowed" : "cursor-pointer", isOver ? "scale-125 -translate-y-2" : "hover:scale-110")} onClick={onClick}>
+        <div
+            ref={setNodeRef}
+            className={cn(
+              "flex flex-col items-center gap-1 transition-all",
+              disabled ? "opacity-30 grayscale cursor-not-allowed" : "cursor-pointer",
+              isOver ? "scale-125 -translate-y-2" : "hover:scale-110"
+            )}
+            onClick={disabled ? undefined : onClick}
+        >
             <div className={cn(
                 "p-2 rounded-lg transition-colors", 
                 isOver 
@@ -199,6 +208,25 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   const [deleteNoteId, setDeleteNoteId] = useState<string | null>(null); // 待删除的笔记ID
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false); // 新建文件夹对话框
   const [folderNameInput, setFolderNameInput] = useState(""); // 文件夹名称输入框
+  // 子文件夹移动对话框
+  const [moveSubfolderDialogOpen, setMoveSubfolderDialogOpen] = useState(false);
+  const [moveSubfolderTargets, setMoveSubfolderTargets] = useState<any[]>([]);
+  const [lastMoveTargetId, setLastMoveTargetId] = useState<string | null>(null);
+
+  // 读取上次移动目标（本地缓存，按用户区分）
+  useEffect(() => {
+    if (typeof window === "undefined" || !userId) return;
+    try {
+      const key = `sumunote:lastMoveFolder:${userId}`;
+      const stored = window.localStorage.getItem(key);
+      if (stored) {
+        setLastMoveTargetId(stored);
+      }
+    } catch {
+      // 忽略本地存储错误
+    }
+  }, [userId]);
+
   const lastSavedTimestampRef = useRef<string | null>(null); // 记录最后一次保存的时间戳（服务器返回）
   const realtimeChannelRef = useRef<any>(null); // Realtime 订阅通道
   const isSavingRef = useRef<boolean>(false); // 标记是否正在保存（用于忽略自己的更新事件）
@@ -528,7 +556,29 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       lastSavedTimestampRef.current = note.updated_at || new Date().toISOString();
   };
 
-  const handleAddNote = async () => { const { data } = await supabase.from('notes').insert({ user_id: userId, folder_id: folderId, title: "", content: "" }).select().single(); if (data) enterEditor(data); };
+  const handleAddNote = async () => {
+    const { data } = await supabase
+      .from('notes')
+      .insert({ user_id: userId, folder_id: folderId, title: "", content: "" })
+      .select()
+      .single();
+    if (data) {
+      enterEditor(data);
+      // 新建笔记建后立即进入编辑器，撤销即删除该空白笔记
+      toast({
+        title: "新笔记已创建",
+        description: "点击撤销可删除此空白笔记",
+        variant: "default",
+        duration: 5000,
+        undoAction: async () => {
+          await supabase.from('notes').delete().eq('id', data.id);
+          setView("list");
+          fetchNotes();
+          toast({ title: "已撤销创建", description: "空白笔记已删除", variant: "default", duration: 3000 });
+        },
+      });
+    }
+  };
   
   const handleAddFolder = () => {
     setFolderNameInput("");
@@ -546,10 +596,26 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     if (!error) {
       setCreateFolderDialogOpen(false);
       setFolderNameInput("");
+      // 刷新后获取新建文件夹的 id，供撤销时删除
+      const { data: newFolderData } = await supabase
+        .from("folders")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("name", name)
+        .eq("parent_id", folderId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
       toast({
         title: "创建成功",
-        description: "文件夹已创建",
+        description: `文件夹「${name}」已创建`,
         variant: "default",
+        duration: 5000,
+        undoAction: newFolderData ? async () => {
+          await supabase.from("folders").delete().eq("id", newFolderData.id);
+          fetchSubFolders();
+          toast({ title: "已撤销创建", description: `文件夹「${name}」已删除`, variant: "default", duration: 3000 });
+        } : undefined,
       });
       // 刷新笔记列表和子文件夹列表
       fetchNotes();
@@ -1064,10 +1130,24 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       .eq('id', deleteNoteId);
     
     if (!error) {
+      const deletedNoteId = deleteNoteId;
       toast({
         title: "已移入回收站",
         description: "笔记已移入回收站",
         variant: "default",
+        duration: 5000,
+        undoAction: async () => {
+          if (deletedNoteId) {
+            await supabase.from('notes').update({ is_deleted: false }).eq('id', deletedNoteId);
+          }
+          fetchNotes();
+          toast({
+            title: "已撤销删除",
+            description: "笔记已从回收站还原",
+            variant: "default",
+            duration: 3000,
+          });
+        },
       });
       // 返回列表视图并刷新
       setView("list");
@@ -1785,6 +1865,9 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     // 分离文件夹ID和笔记ID
     const folderIds = ids.filter(id => subFolders.some(f => f.id === id));
     const noteIds = ids.filter(id => notes.some(n => n.id === id));
+    // 快照当前居此数据，供撤销时使用
+    const deletedFoldersCopy = subFolders.filter(f => folderIds.includes(f.id));
+    const deletedNotesCopy = notes.filter(n => noteIds.includes(n.id));
     
     if (showTrash) {
       // 回收站：永久删除，需要确认
@@ -1824,9 +1907,175 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
           title: "删除成功",
           description: `${folderIds.length > 0 ? `${folderIds.length} 个文件夹已删除，` : ''}${noteIds.length > 0 ? `${noteIds.length} 个笔记已移入回收站` : ''}`,
           variant: "default",
+          duration: 5000,
+          undoAction: async () => {
+            // 撤销删除文件夹（重新插入）
+            if (deletedFoldersCopy.length > 0) {
+              await supabase.from("folders").insert(
+                deletedFoldersCopy.map(({ id, name, parent_id, user_id }) => ({ id, name, parent_id, user_id }))
+              );
+            }
+            // 撤销笔记移入回收站
+            if (deletedNotesCopy.length > 0) {
+              await supabase.from("notes").update({ is_deleted: false }).in("id", deletedNotesCopy.map(n => n.id));
+            }
+            fetchSubFolders();
+            fetchNotes();
+            toast({
+              title: "已撤销删除",
+              description: "内容已还原",
+              variant: "default",
+              duration: 3000,
+            });
+          },
         });
       }
     }
+  };
+
+  // 从 dock 触发“移动”（支持同时移动子文件夹和笔记）
+  const handleMoveSubfoldersClick = async () => {
+    const ids = Array.from(selectedIds);
+    const folderIds = ids.filter((id) => subFolders.some((f) => f.id === id));
+    const noteIds = ids.filter((id) => notes.some((n) => n.id === id));
+    if (folderIds.length === 0 && noteIds.length === 0) {
+      toast({
+        title: "无法移动",
+        description: "请先选中要移动的文件夹或笔记",
+        variant: "default",
+      });
+      return;
+    }
+
+    // 获取所有可作为目标的文件夹（排除当前选中的子文件夹本身）
+    const { data, error } = await supabase
+      .from("folders")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (error || !data) {
+      toast({
+        title: "加载失败",
+        description: error?.message || "加载文件夹列表时出错",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // 目标文件夹不能是被移动的文件夹本身
+    const targets = data.filter((f) => !folderIds.includes(f.id));
+    if (targets.length === 0) {
+      toast({
+        title: "没有可移动到的位置",
+        description: "没有可作为目标的其他文件夹",
+        variant: "default",
+      });
+      return;
+    }
+
+    setMoveSubfolderTargets(targets);
+    setMoveSubfolderDialogOpen(true);
+  };
+
+  const handleMoveSubfoldersToTarget = async (targetFolderId: string) => {
+    const ids = Array.from(selectedIds);
+    const folderIds = ids.filter((id) => subFolders.some((f) => f.id === id));
+    const noteIds = ids.filter((id) => notes.some((n) => n.id === id));
+    if (folderIds.length === 0 && noteIds.length === 0) {
+      setMoveSubfolderDialogOpen(false);
+      return;
+    }
+
+    // 先移动文件夹，再移动笔记
+    if (folderIds.length > 0) {
+      const { error: folderError } = await supabase
+        .from("folders")
+        .update({ parent_id: targetFolderId })
+        .in("id", folderIds);
+
+      if (folderError) {
+        toast({
+          title: "移动失败",
+          description: folderError.message || "移动文件夹时出错",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    if (noteIds.length > 0) {
+      const { error: noteError } = await supabase
+        .from("notes")
+        .update({ folder_id: targetFolderId })
+        .in("id", noteIds);
+
+      if (noteError) {
+        toast({
+          title: "移动失败",
+          description: noteError.message || "移动笔记时出错",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const movedFoldersText =
+      folderIds.length > 0 ? `${folderIds.length} 个文件夹` : "";
+    const movedNotesText =
+      noteIds.length > 0 ? `${noteIds.length} 篇笔记` : "";
+
+    // 记住原始位置，供撤销时使用
+    const originalFolderParents = folderIds.map((id) => ({
+      id,
+      parent_id: subFolders.find((f) => f.id === id)?.parent_id ?? null,
+    }));
+    const originalNoteParents = noteIds.map((id) => ({
+      id,
+      folder_id: notes.find((n) => n.id === id)?.folder_id ?? null,
+    }));
+
+    toast({
+      title: "移动成功",
+      description:
+        movedFoldersText && movedNotesText
+          ? `${movedFoldersText} 与 ${movedNotesText} 已移动`
+          : movedFoldersText || movedNotesText || "内容已移动",
+      variant: "success",
+      duration: 5000,
+      undoAction: async () => {
+        for (const { id, parent_id } of originalFolderParents) {
+          await supabase.from("folders").update({ parent_id }).eq("id", id);
+        }
+        for (const { id, folder_id } of originalNoteParents) {
+          await supabase.from("notes").update({ folder_id }).eq("id", id);
+        }
+        fetchSubFolders();
+        fetchNotes();
+        toast({
+          title: "已撤销移动",
+          description: "内容已还原到原来的位置",
+          variant: "default",
+          duration: 3000,
+        });
+      },
+    });
+
+    // 记录“上次移动到”的目标文件夹
+    setLastMoveTargetId(targetFolderId);
+    if (typeof window !== "undefined" && userId) {
+      try {
+        const key = `sumunote:lastMoveFolder:${userId}`;
+        window.localStorage.setItem(key, targetFolderId);
+      } catch {
+        // 忽略本地存储错误
+      }
+    }
+
+    setMoveSubfolderDialogOpen(false);
+    // 刷新当前文件夹下的子文件夹和笔记列表
+    fetchSubFolders();
+    fetchNotes();
+    exitSelectionMode();
   };
 
   const confirmBatchDelete = async () => {
@@ -2010,6 +2259,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     else if (over.id === 'dock-copy') handleCopy();
     else if (over.id === 'dock-restore') handleRestore();
     else if (over.id === 'dock-pin') handlePin(); // 🔥 拖拽置顶
+    else if (over.id === 'dock-move-subfolder') handleMoveSubfoldersClick();
   };
   const handleDragStart = (event: any) => { setActiveId(event.active.id); if (!selectedIds.has(event.active.id)) { const newSet = new Set(selectedIds); newSet.add(event.active.id); setSelectedIds(newSet); } };
 
@@ -3141,7 +3391,21 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
             <div className="px-4 pb-3"><div className="relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" /><Input placeholder={showTrash ? "搜索回收站..." : "搜索笔记..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-accent/50 border-none h-9"/></div></div>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-32" style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-32"
+          style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+          onClick={(e) => {
+            if (!isSelectionMode) return;
+            const target = e.target as HTMLElement;
+            if (
+              target.closest("[data-note-card]") ||
+              target.closest("[data-subfolder-card]")
+            ) {
+              return;
+            }
+            exitSelectionMode();
+          }}
+        >
         <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-3 p-3 sm:p-4">
             {/* 显示子文件夹 */}
             {!showTrash && filteredSubFolders.map((folder) => {
@@ -3149,6 +3413,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
               return (
                 <div
                   key={folder.id}
+                  data-subfolder-card
                   className={cn(
                     "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y",
                     isSelected ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]" : "bg-card border-border hover:bg-accent/50 active:scale-95"
@@ -3268,6 +3533,15 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
                             <div className="p-2 bg-accent rounded-lg"><Pencil className="w-5 h-5" /></div>
                             <span className="text-[10px]">重命名</span>
                         </div>
+
+                        {/* 移动子文件夹（仅当选中项中包含子文件夹时可用） */}
+                        <DroppableDockItem
+                          id="dock-move-subfolder"
+                          icon={FolderInput}
+                          label="移动"
+                          disabled={selectedIds.size === 0}
+                          onClick={handleMoveSubfoldersClick}
+                        />
                         
                         {/* 🔥 新增 Dock 置顶按钮 */}
                         <DroppableDockItem 
@@ -3314,6 +3588,97 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+      {/* 文件夹 / 笔记移动对话框 */}
+      <Dialog open={moveSubfolderDialogOpen} onOpenChange={setMoveSubfolderDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>移动到...</DialogTitle>
+            <DialogDescription>
+              选择要将选中的文件夹和笔记移动到哪个目标文件夹。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto py-2 space-y-3">
+            {/* 上次移动的快捷入口 */}
+            {lastMoveTargetId && (
+              (() => {
+                const lastTarget = moveSubfolderTargets.find(
+                  (f) => f.id === lastMoveTargetId
+                );
+                if (!lastTarget) return null;
+                return (
+                  <div className="border border-dashed border-border rounded-md p-2 space-y-1">
+                    <div className="text-[11px] text-muted-foreground">
+                      上次移动到
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="justify-start h-auto py-2 text-sm"
+                      onClick={() => handleMoveSubfoldersToTarget(lastTarget.id)}
+                    >
+                      <Folder className="w-4 h-4 mr-2 text-yellow-500" />
+                      <span className="truncate">
+                        {lastTarget.name || "未命名文件夹"}
+                      </span>
+                    </Button>
+                  </div>
+                );
+              })()
+            )}
+
+            {/* 按层级展开的目标文件夹列表 */}
+            <div className="space-y-1">
+              {(() => {
+                if (!moveSubfolderTargets.length) {
+                  return (
+                    <p className="text-xs text-muted-foreground px-1">
+                      暂无可用的目标文件夹。
+                    </p>
+                  );
+                }
+
+                // 构建层级树（全部展开）
+                const byParent = new Map<string | null, any[]>();
+                for (const f of moveSubfolderTargets) {
+                  const key = f.parent_id ?? null;
+                  if (!byParent.has(key)) byParent.set(key, []);
+                  byParent.get(key)!.push(f);
+                }
+                for (const group of byParent.values()) {
+                  group.sort((a, b) =>
+                    (a.name || "").localeCompare(b.name || "", "zh-CN")
+                  );
+                }
+
+                const items: { folder: any; depth: number }[] = [];
+                const walk = (parentId: string | null, depth: number) => {
+                  const children = byParent.get(parentId) || [];
+                  for (const child of children) {
+                    items.push({ folder: child, depth });
+                    walk(child.id, depth + 1);
+                  }
+                };
+                walk(null, 0);
+
+                return items.map(({ folder, depth }) => (
+                  <Button
+                    key={folder.id}
+                    variant="outline"
+                    className="justify-start h-auto py-2 text-sm"
+                    style={{ paddingLeft: 12 + depth * 16 }}
+                    onClick={() => handleMoveSubfoldersToTarget(folder.id)}
+                  >
+                    <Folder className="w-4 h-4 mr-2 text-yellow-500" />
+                    <span className="truncate">
+                      {folder.name || "未命名文件夹"}
+                    </span>
+                  </Button>
+                ));
+              })()}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
         {/* 重命名对话框 */}
         {/* 新建文件夹对话框 */}
