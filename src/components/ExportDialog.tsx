@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/lib/supabase";
+import { getNotesForUser } from "@/lib/note-service";
+import type { Note } from "@/types/note";
 import { cn } from "@/lib/utils";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -15,14 +17,6 @@ interface Folder {
   id: string;
   name: string;
   notes: Note[];
-}
-
-interface Note {
-  id: string;
-  title: string;
-  content: string;
-  folder_id: string | null;
-  updated_at: string;
 }
 
 interface ExportDialogProps {
@@ -68,22 +62,7 @@ export default function ExportDialog({ isOpen, onClose, userId }: ExportDialogPr
       }
 
       const foldersData = foldersResult.data || [];
-
-      // 获取所有笔记（排除已删除的）
-      // 注意：如果 is_deleted 字段可能为 null，使用 or 条件
-      const notesResult = await supabase
-        .from("notes")
-        .select("id, title, content, folder_id, updated_at")
-        .eq("user_id", userId)
-        .or("is_deleted.eq.false,is_deleted.is.null")
-        .order("updated_at", { ascending: false });
-
-      if (notesResult.error) {
-        console.error("Notes error:", notesResult.error);
-        throw new Error(notesResult.error.message || "获取笔记失败");
-      }
-
-      const notesData = notesResult.data || [];
+      const notesData = await getNotesForUser(userId);
 
       console.log("Loaded data:", {
         foldersCount: foldersData.length,

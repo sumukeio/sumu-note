@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Folder, Trash2, FolderInput, X, Check, Loader2, Plus, Pencil } from "lucide-react"; // 🔥 引入 Pencil
 import { supabase } from "@/lib/supabase";
+import { updateNotesFolder } from "@/lib/note-service";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
@@ -122,11 +123,12 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
           return;
         }
     } else {
-        const { error: notesError } = await supabase.from('notes').update({ folder_id: targetFolderId }).in('folder_id', idsToMove);
-        if (notesError) {
+        try {
+          await updateNotesFolder(idsToMove, targetFolderId, userId);
+        } catch (notesError: unknown) {
           toast({
             title: "移动失败",
-            description: notesError.message || "移动笔记时出错",
+            description: (notesError as Error)?.message || "移动笔记时出错",
             variant: "destructive",
           });
           return;

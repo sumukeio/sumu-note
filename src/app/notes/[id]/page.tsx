@@ -2,20 +2,13 @@
 
 import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { getNoteByIdOrTitle, getBacklinks } from "@/lib/note-service";
+import type { Note } from "@/types/note";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Link2, Loader2, ChevronUp, ChevronDown, X, Edit } from "lucide-react";
 import { findAllMatches, getNextMatchIndex, getPreviousMatchIndex, type Match } from "@/lib/search-utils";
 import { cn } from "@/lib/utils";
-
-interface Note {
-  id: string;
-  title: string | null;
-  content: string | null;
-  updated_at: string | null;
-  folder_id?: string | null;
-}
 
 interface BacklinkItem {
   id: string;
@@ -47,41 +40,7 @@ function NoteDetailPageContent() {
   useEffect(() => {
     const run = async () => {
       try {
-        // 1. 先按 id 精确查找
-        let { data: noteById, error: noteByIdError } = await supabase
-          .from("notes")
-          .select("*")
-          .eq("id", noteIdOrTitle)
-          .maybeSingle();
-
-        if (noteByIdError) {
-          // 记录错误但不立即抛出，继续尝试按标题
-          console.warn("Fetch note by id error:", noteByIdError.message);
-        }
-
-        let targetNote: any = noteById;
-
-        // 2. 如果按 id 没找到，则按标题尝试（取第一条）
-        if (!targetNote) {
-          const { data: notesByTitle, error: noteByTitleError } =
-            await supabase
-              .from("notes")
-              .select("*")
-              .ilike("title", noteIdOrTitle)
-              .limit(1);
-
-          if (noteByTitleError) {
-            console.warn(
-              "Fetch note by title error:",
-              noteByTitleError.message
-            );
-          }
-
-          if (notesByTitle && notesByTitle.length > 0) {
-            targetNote = notesByTitle[0];
-          }
-        }
-
+        const targetNote = await getNoteByIdOrTitle(noteIdOrTitle);
         if (!targetNote) {
           setError("未找到这篇笔记");
           setLoading(false);
@@ -92,37 +51,14 @@ function NoteDetailPageContent() {
         setNote(targetNote);
         setLoading(false);
 
-        // 3. 查询 Backlinks
         const idPattern = `%[[${targetNote.id}%`;
-        const titlePattern = targetNote.title
-          ? `%[[${targetNote.title}]]%`
-          : null;
+        const titlePattern = targetNote.title ? `%[[${targetNote.title}]]%` : null;
+        const backlinksData = await getBacklinks(targetNote.id, idPattern, titlePattern);
 
-        let query = supabase
-          .from("notes")
-          .select("id, title, content, updated_at")
-          .neq("id", targetNote.id);
-
-        // 通过 ILIKE 模糊匹配 content
-        if (titlePattern) {
-          query = query.or(
-            `content.ilike.${idPattern},content.ilike.${titlePattern}`
-          );
-        } else {
-          query = query.ilike("content", idPattern);
-        }
-
-        const { data: backlinksData, error: backlinksError } = await query;
-
-        if (backlinksError) {
-          console.warn("Fetch backlinks error:", backlinksError.message);
-          setBacklinks([]);
-        } else {
-          setBacklinks(backlinksData || []);
-        }
-      } catch (err: any) {
+        setBacklinks(backlinksData?.length ? backlinksData : []);
+      } catch (err: unknown) {
         console.error(err);
-        setError(err?.message || "加载笔记失败");
+        setError((err as Error)?.message || "加载笔记失败");
       } finally {
         setLoadingBacklinks(false);
       }

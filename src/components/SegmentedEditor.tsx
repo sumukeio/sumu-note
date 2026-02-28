@@ -70,9 +70,12 @@ export default function SegmentedEditor({
 
   const autoResizeTextarea = useCallback((el: HTMLTextAreaElement | null) => {
     if (!el) return;
-    // 让 textarea 随内容自动增高（避免“框框很小/写很多也不变大”）
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    const next = el.scrollHeight;
+    // 仅当需要更高时才设置，避免从多行删到少行时反复改高度触发布局抖动
+    if (next > el.clientHeight) {
+      el.style.height = `${next}px`;
+    }
   }, []);
 
   const extractTokenAtCursor = useCallback((text: string, cursor: number) => {
@@ -342,64 +345,34 @@ export default function SegmentedEditor({
   // 用于跟踪是否是由内部操作触发的更新（避免循环更新）
   const isInternalUpdateRef = useRef(false);
 
-  // 恢复光标位置和滚动位置（需要在 useEffect 之前定义）
+  // 恢复光标位置和滚动位置（仅移动端：键盘弹出/收起后恢复；PC 端不执行，避免抖动）
   const restoreCursorPosition = useCallback(() => {
-    const saved = savedCursorStateRef.current;
-    if (!saved) return;
-    
-    const textarea = textareaRefs.current.get(saved.segmentIndex);
-    if (!textarea) return;
-    
     const isMobile =
       typeof navigator !== "undefined" &&
       /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    
-    // 桌面端：恢复滚动位置；移动端交给浏览器处理，避免与虚拟键盘行为冲突
-    if (!isMobile) {
-      textarea.scrollTop = saved.scrollTop;
-      textarea.scrollLeft = saved.scrollLeft;
-    }
-    
-    // 恢复光标位置
+    if (!isMobile) return;
+
+    const saved = savedCursorStateRef.current;
+    if (!saved) return;
+
+    const textarea = textareaRefs.current.get(saved.segmentIndex);
+    if (!textarea) return;
+
+    // 移动端：恢复滚动位置（桌面端已在上方 return）
+    textarea.scrollTop = saved.scrollTop;
+    textarea.scrollLeft = saved.scrollLeft;
+
     const restoreCursor = () => {
       if (textarea && saved.cursorPosition <= textarea.value.length) {
         textarea.setSelectionRange(saved.cursorPosition, saved.cursorPosition);
-        // 桌面端：确保光标在可视区域内；移动端由浏览器和键盘控制滚动
-        if (!isMobile) {
-          const textareaRect = textarea.getBoundingClientRect();
-          const container = textarea.parentElement?.parentElement;
-          if (container) {
-            const containerRect = container.getBoundingClientRect();
-            // 如果光标不在可视区域内，滚动到光标位置
-            if (textarea.scrollTop === saved.scrollTop) {
-              // 计算光标在 textarea 中的位置
-              const textBeforeCursor = textarea.value.substring(0, saved.cursorPosition);
-              const lines = textBeforeCursor.split('\n');
-              const lineHeight = 20; // 估算行高
-              const cursorTop = (lines.length - 1) * lineHeight;
-              
-              // 如果光标在可视区域外，滚动到光标位置
-              if (cursorTop < textarea.scrollTop || cursorTop > textarea.scrollTop + textarea.clientHeight) {
-                textarea.scrollTop = Math.max(0, cursorTop - textarea.clientHeight / 2);
-              }
-            }
-          }
-        }
       }
     };
-    
-    // 立即尝试恢复
+
     restoreCursor();
-    
-    // 使用 requestAnimationFrame 确保 DOM 已更新
     requestAnimationFrame(() => {
       restoreCursor();
-      requestAnimationFrame(() => {
-        restoreCursor();
-      });
+      requestAnimationFrame(restoreCursor);
     });
-    
-    // 移动端键盘弹出后可能需要延迟恢复光标位置（不强制滚动）
     setTimeout(restoreCursor, 50);
     setTimeout(restoreCursor, 200);
   }, []);
@@ -1031,7 +1004,7 @@ export default function SegmentedEditor({
               ref={(el) => {
                 if (el) {
                   textareaRefs.current.set(segmentIndex, el);
-                  autoResizeTextarea(el);
+                  // 不在 ref 中 autoResize，避免每次渲染都改高度导致 PC 端光标抖动；高度在 onChange 中更新
                 } else {
                   textareaRefs.current.delete(segmentIndex);
                 }

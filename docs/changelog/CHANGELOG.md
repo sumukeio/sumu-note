@@ -59,6 +59,17 @@
 - ✅ 更新 `docs/弹窗替换进度.md`，增加 Toast + Undo 的设计与使用说明。
 - ✅ 更新 `docs/productmanager/PRD_SUMU_NOTE.md` 与 `docs/productmanager/移动端编辑体验优化_PRD.md`，在产品层补充“关键操作支持 Toast + 撤销”的规格描述。
 
+### 🔧 技术改进：笔记模块重构与类型收紧
+
+- **补全逻辑解耦**：
+  - 将 `[[ 链接 ]]` 与 `# 标签` 的检测/候选/键盘导航抽离为 `useLinkComplete` / `useTagComplete`。
+  - 补全 UI 统一由 `NoteEditor` 渲染，`NoteManager` 不再维护补全细粒度状态。
+- **错误语义统一（note-service）**：
+  - `src/lib/note-service.ts` 统一抛出 `NoteServiceError`（含 `operation`），便于上层 Toast/重试/埋点。
+- **类型安全提升**：
+  - 笔记/文件夹相关 state 与事件回调由 `any` 收敛到 `Note` / `FolderItem`。
+  - 拖拽事件类型与组件 props 对齐（`DragStartEvent`）。
+
 ---
 
 ## 2025-01-XX（历史）

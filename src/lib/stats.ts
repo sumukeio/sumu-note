@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "./supabase";
+import { getNotesForUser } from "./note-service";
 import {
   eachDayOfInterval,
   format,
@@ -80,23 +81,17 @@ async function fetchBaseData(userId: string): Promise<{
   notes: NoteRow[];
   folders: FolderRow[];
 }> {
-  const [notesRes, foldersRes] = await Promise.all([
-    supabase
-      .from("notes")
-      .select("id, title, content, folder_id, updated_at")
-      .eq("user_id", userId),
+  const [notes, foldersRes] = await Promise.all([
+    getNotesForUser(userId),
     supabase.from("folders").select("id, name").eq("user_id", userId),
   ]);
 
-  if (notesRes.error) {
-    throw new Error(notesRes.error.message || "Failed to fetch notes");
-  }
   if (foldersRes.error) {
     throw new Error(foldersRes.error.message || "Failed to fetch folders");
   }
 
   return {
-    notes: (notesRes.data || []) as NoteRow[],
+    notes: notes as NoteRow[],
     folders: (foldersRes.data || []) as FolderRow[],
   };
 }

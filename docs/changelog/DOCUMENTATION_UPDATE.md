@@ -1,6 +1,32 @@
 # 文档更新总结
 
 ## 📝 更新日期
+2026-02-28（最新）
+
+## ✅ 最新更新（2026-02-28）
+
+### 笔记模块：补全抽离、错误语义、类型收紧（文档同步）
+
+1. **`docs/架构审查_笔记模块.md`**
+   - ✅ 同步现状：`note-service` 已落地、`NoteServiceError` 统一错误语义
+   - ✅ 同步现状：`NoteManager/NoteEditor/NoteList` 拆分后的职责、行数与数据流更新
+   - ✅ 同步现状：`useLinkComplete` / `useTagComplete` 与补全 UI 归属
+
+2. **`docs/changelog/CHANGELOG.md`**
+   - ✅ 增补“技术改进：笔记模块重构与类型收紧”章节（补全 hooks、NoteServiceError、拖拽事件类型对齐）
+
+3. **`docs/productmanager/PRD_SUMU_NOTE.md`**
+   - ✅ 在“编辑笔记”功能点补充 `[[` 双向链接补全与 `#` 标签补全的产品规格描述
+
+4. **`docs/features/NOTE_EDITOR_OPTIMIZATION.md`**
+   - ✅ 更新“智能补全”描述，并注明近期落地方式（hooks + NoteEditor 统一渲染）
+
+5. **`docs/SegmentedEditor集成完成.md`**
+   - ✅ 同步链接补全从容器抽离为 hook 的实现现状与限制说明
+
+---
+
+## 📝 更新日期
 2025-01-XX（最新）
 
 ## ✅ 最新更新（2025-01-XX）

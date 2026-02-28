@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getNoteFolderId, searchNotes } from "@/lib/note-service";
 import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
 import FolderManager from "@/components/FolderManager"; // 引入
@@ -149,45 +150,31 @@ function DashboardPageContent() {
           });
       } else {
         // 没有 folderId，先查询笔记的 folder_id
-        supabase
-          .from('notes')
-          .select('folder_id')
-          .eq('id', noteId)
-          .eq('user_id', user.id)
-          .single()
-          .then(({ data, error }) => {
-            if (!error && data) {
-              if (data.folder_id) {
-                // 有 folder_id，获取文件夹信息
-                supabase
-                  .from('folders')
-                  .select('id, name')
-                  .eq('id', data.folder_id)
-                  .eq('user_id', user.id)
-                  .single()
-                  .then(({ data: folderData, error: folderError }) => {
-                    if (!folderError && folderData) {
-                      setCurrentFolder({ id: folderData.id, name: folderData.name });
-                      setInitialNoteId(noteId);
-                      // 清除搜索查询，确保显示 NoteManager 而不是搜索结果
-                      setSearchQuery("");
-                      // 延迟清除 URL 参数，确保状态已更新
-                      setTimeout(() => {
-                        router.replace('/dashboard', { scroll: false });
-                      }, 500);
-                    } else {
-                      processedParamsRef.current = ""; // 失败时重置标志
-                    }
-                  });
-              } else {
-                // 没有 folder_id，笔记在根目录，无法直接打开编辑（需要先进入根目录）
-                console.warn('Note has no folder_id, cannot open directly');
-                processedParamsRef.current = ""; // 失败时重置标志
-              }
-            } else {
-              processedParamsRef.current = ""; // 失败时重置标志
-            }
-          });
+        getNoteFolderId(noteId, user.id).then((folderIdFromNote) => {
+          if (folderIdFromNote) {
+            supabase
+              .from('folders')
+              .select('id, name')
+              .eq('id', folderIdFromNote)
+              .eq('user_id', user.id)
+              .single()
+              .then(({ data: folderData, error: folderError }) => {
+                if (!folderError && folderData) {
+                  setCurrentFolder({ id: folderData.id, name: folderData.name });
+                  setInitialNoteId(noteId);
+                  setSearchQuery("");
+                  setTimeout(() => router.replace('/dashboard', { scroll: false }), 500);
+                } else {
+                  processedParamsRef.current = "";
+                }
+              });
+          } else {
+            console.warn('Note has no folder_id, cannot open directly');
+            processedParamsRef.current = "";
+          }
+        }).catch(() => {
+          processedParamsRef.current = "";
+        });
       }
     } else if (searchParam) {
       // 只有搜索参数，设置到搜索框
@@ -222,39 +209,19 @@ function DashboardPageContent() {
     abortControllerRef.current = abortController;
 
     setSearching(true);
-    const q = `%${query.trim()}%`;
-    
     try {
-    const { data, error } = await supabase
-      .from("notes")
-      .select("id, title, content, folder_id, updated_at, tags")
-      .eq("user_id", user.id)
-      .or(`title.ilike.${q},content.ilike.${q},tags.ilike.${q}`);
-
-      // 检查是否被取消
-      if (abortController.signal.aborted) {
-        return;
-      }
-
-    if (error) {
-      console.error(error);
-      setSearchResults([]);
-      setSelectedResultIndex(-1);
-    } else {
-      setSearchResults(data || []);
-      // 重置选中索引，如果有结果则选中第一个
-      setSelectedResultIndex(data && data.length > 0 ? 0 : -1);
-    }
-    } catch (err: any) {
-      // 忽略取消请求的错误
-      if (err.name !== 'AbortError') {
+      const data = await searchNotes(user.id, query.trim());
+      if (abortController.signal.aborted) return;
+      setSearchResults(data);
+      setSelectedResultIndex(data.length > 0 ? 0 : -1);
+    } catch (err: unknown) {
+      if (!abortController.signal.aborted && (err as Error)?.name !== 'AbortError') {
         console.error(err);
         setSearchResults([]);
+        setSelectedResultIndex(-1);
       }
     } finally {
-      if (!abortController.signal.aborted) {
-        setSearching(false);
-      }
+      if (!abortController.signal.aborted) setSearching(false);
     }
   }, [user?.id]);
 
