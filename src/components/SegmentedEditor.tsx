@@ -45,6 +45,7 @@ export default function SegmentedEditor({
   const [segments, setSegments] = useState<Segment[]>([]);
   const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map());
   const pendingUpdateRef = useRef<string | null>(null);
+  const flushScheduledRef = useRef(false);
   const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
   const [pendingLinkToken, setPendingLinkToken] = useState<string | null>(null);
   
@@ -67,6 +68,27 @@ export default function SegmentedEditor({
   const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number; bottom?: number } | null>(null);
   const [toolbarContext, setToolbarContext] = useState<'text' | 'code' | 'table'>('text');
   const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const flushPendingUpdate = useCallback(() => {
+    const markdown = pendingUpdateRef.current;
+    if (markdown === null) return;
+    pendingUpdateRef.current = null;
+    // 标记这是内部更新，避免触发重新解析覆盖局部状态
+    isInternalUpdateRef.current = true;
+    onChange(markdown);
+  }, [onChange]);
+
+  const scheduleFlushPendingUpdate = useCallback(() => {
+    if (flushScheduledRef.current) return;
+    flushScheduledRef.current = true;
+    const run = () => {
+      flushScheduledRef.current = false;
+      flushPendingUpdate();
+    };
+    // microtask 优先，避免渲染期间同步触发父组件更新
+    if (typeof queueMicrotask === "function") queueMicrotask(run);
+    else setTimeout(run, 0);
+  }, [flushPendingUpdate]);
 
   const autoResizeTextarea = useCallback((el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -324,7 +346,8 @@ export default function SegmentedEditor({
       pendingUpdateRef.current = segmentsToMarkdown(newSegments);
       return newSegments;
     });
-  }, [segmentsToMarkdown]);
+    scheduleFlushPendingUpdate();
+  }, [segmentsToMarkdown, scheduleFlushPendingUpdate]);
 
   // 使用 ref 暴露插入表格方法给父组件
   const insertTableRef = useRef<(() => void) | null>(null);
@@ -347,34 +370,9 @@ export default function SegmentedEditor({
 
   // 恢复光标位置和滚动位置（仅移动端：键盘弹出/收起后恢复；PC 端不执行，避免抖动）
   const restoreCursorPosition = useCallback(() => {
-    const isMobile =
-      typeof navigator !== "undefined" &&
-      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (!isMobile) return;
-
-    const saved = savedCursorStateRef.current;
-    if (!saved) return;
-
-    const textarea = textareaRefs.current.get(saved.segmentIndex);
-    if (!textarea) return;
-
-    // 移动端：恢复滚动位置（桌面端已在上方 return）
-    textarea.scrollTop = saved.scrollTop;
-    textarea.scrollLeft = saved.scrollLeft;
-
-    const restoreCursor = () => {
-      if (textarea && saved.cursorPosition <= textarea.value.length) {
-        textarea.setSelectionRange(saved.cursorPosition, saved.cursorPosition);
-      }
-    };
-
-    restoreCursor();
-    requestAnimationFrame(() => {
-      restoreCursor();
-      requestAnimationFrame(restoreCursor);
-    });
-    setTimeout(restoreCursor, 50);
-    setTimeout(restoreCursor, 200);
+    // 移动端浏览器对键盘/可视区域的滚动有自己的策略。
+    // 这里曾经尝试“强行恢复光标与滚动”，但在部分移动端会触发回顶/丢光标的副作用，因此禁用。
+    return;
   }, []);
 
   // 初始化解析内容
@@ -388,41 +386,12 @@ export default function SegmentedEditor({
     setSegments(parsed);
   }, [content, parseContent]);
 
-  // 处理待更新的内容（避免在渲染期间更新父组件）
-  // 使用独立的 effect 来处理 pendingUpdateRef，不依赖 segments
-  // 使用轮询机制定期检查 pendingUpdateRef，避免依赖 segments 导致无限循环
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      if (pendingUpdateRef.current !== null) {
-        const markdown = pendingUpdateRef.current;
-        pendingUpdateRef.current = null;
-        // 标记这是内部更新，避免触发重新解析
-        isInternalUpdateRef.current = true;
-        // 使用 setTimeout 确保在下一个事件循环中更新，避免在渲染期间更新父组件
-        setTimeout(() => {
-          onChange(markdown);
-          // 只在非输入状态下恢复光标位置（避免快速输入时频繁恢复导致抖动）
-          // 如果正在输入，延迟恢复，等待输入停止
-          if (!isTypingRef.current) {
-            // 清除之前的恢复定时器
-            if (restoreCursorTimeoutRef.current) {
-              clearTimeout(restoreCursorTimeoutRef.current);
-            }
-            restoreCursorTimeoutRef.current = setTimeout(() => {
-              restoreCursorPosition();
-            }, 50);
-          }
-        }, 0);
-      }
-    }, 50); // 每 50ms 检查一次
-    
     return () => {
-      clearInterval(intervalId);
-      if (restoreCursorTimeoutRef.current) {
-        clearTimeout(restoreCursorTimeoutRef.current);
-      }
+      if (restoreCursorTimeoutRef.current) clearTimeout(restoreCursorTimeoutRef.current);
+      if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
     };
-  }, [onChange, restoreCursorPosition]);
+  }, []);
   
   // 当 segments 更新后，恢复光标位置（使用 ref 跟踪，避免无限循环）
   useEffect(() => {
@@ -490,6 +459,7 @@ export default function SegmentedEditor({
         }
         return newSegments;
       });
+      scheduleFlushPendingUpdate();
       
       // 在输入停止后（300ms 无输入）标记为非输入状态，并恢复光标
       setTimeout(() => {
@@ -506,7 +476,7 @@ export default function SegmentedEditor({
         }
       }, 300);
     },
-    [segmentsToMarkdown, restoreCursorPosition]
+    [segmentsToMarkdown, restoreCursorPosition, scheduleFlushPendingUpdate]
   );
 
   // 格式化文本
@@ -604,8 +574,9 @@ export default function SegmentedEditor({
         pendingUpdateRef.current = segmentsToMarkdown(newSegments);
         return newSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   // 在表格后面插入一个新的文本段，方便继续输入文字
@@ -631,8 +602,9 @@ export default function SegmentedEditor({
         pendingUpdateRef.current = segmentsToMarkdown(newSegments);
         return newSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   // 表格操作
@@ -666,8 +638,9 @@ export default function SegmentedEditor({
         }
         return prevSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   const handleDeleteTableRow = useCallback(
@@ -683,8 +656,9 @@ export default function SegmentedEditor({
         }
         return prevSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   const handleAddTableColumn = useCallback(
@@ -710,8 +684,9 @@ export default function SegmentedEditor({
         }
         return prevSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   const handleDeleteTableColumn = useCallback(
@@ -729,8 +704,9 @@ export default function SegmentedEditor({
         }
         return prevSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   // 删除整个表格
@@ -766,8 +742,9 @@ export default function SegmentedEditor({
         pendingUpdateRef.current = segmentsToMarkdown(mergedSegments);
         return mergedSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   const handleTableCellChange = useCallback(
@@ -790,8 +767,9 @@ export default function SegmentedEditor({
         }
         return prevSegments;
       });
+      scheduleFlushPendingUpdate();
     },
-    [segmentsToMarkdown]
+    [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
   // 如果内容为空，显示单个 Textarea

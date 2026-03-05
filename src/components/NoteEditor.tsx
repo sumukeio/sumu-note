@@ -529,12 +529,30 @@ export function NoteEditor(props: NoteEditorProps) {
           </div>
         </header>
         <div
+          ref={editorScrollContainerRef}
           className={cn(
-            "flex-1 mx-auto w-full flex flex-col overflow-y-auto min-h-0 pb-20 sm:pb-0",
+            // 移动端避免“嵌套滚动容器”导致键盘/输入时回顶：整页只保留一个主要滚动容器
+            "flex-1 mx-auto w-full flex flex-col overflow-y-auto overscroll-contain min-h-0 pb-20 sm:pb-0",
             zenMode
               ? "max-w-4xl px-8 py-12"
               : "max-w-full sm:max-w-3xl md:max-w-4xl p-3 sm:p-4 md:p-8"
           )}
+          style={
+            {
+              scrollPaddingBottom:
+                "calc(120px + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))",
+              WebkitOverflowScrolling: "touch",
+            } as React.CSSProperties
+          }
+          onScroll={(e) => {
+            if (e.currentTarget) savedScrollTopRef.current = e.currentTarget.scrollTop;
+          }}
+          onBlur={(e) => {
+            const next = e.relatedTarget as Node | null;
+            if (next && e.currentTarget.contains(next)) return;
+            if (editorScrollContainerRef.current)
+              savedScrollTopRef.current = editorScrollContainerRef.current.scrollTop;
+          }}
         >
           {isFindReplaceOpen && (
             <FindReplaceDialog
@@ -624,35 +642,13 @@ export function NoteEditor(props: NoteEditorProps) {
             </div>
           ) : (
             <div
-              className={cn(
-                "relative mt-4 flex flex-col",
-                typeof window !== "undefined" && window.innerWidth < 768
-                  ? "h-[calc(100dvh-14rem)]"
-                  : "flex-1 min-h-0"
-              )}
+              className={cn("relative mt-4 flex flex-col")}
             >
               <div
-                ref={editorScrollContainerRef}
                 className={cn(
-                  "overflow-y-auto",
-                  typeof window !== "undefined" && window.innerWidth < 768 ? "h-full" : "flex-1 min-h-0"
+                  // 由外层容器负责滚动，避免嵌套滚动在移动端回顶/丢光标
+                  "min-h-0"
                 )}
-                style={
-                  {
-                    scrollPaddingBottom:
-                      "calc(120px + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))",
-                    WebkitOverflowScrolling: "touch",
-                  } as React.CSSProperties
-                }
-                onScroll={(e) => {
-                  if (e.currentTarget) savedScrollTopRef.current = e.currentTarget.scrollTop;
-                }}
-                onBlur={(e) => {
-                  const next = e.relatedTarget as Node | null;
-                  if (next && e.currentTarget.contains(next)) return;
-                  if (editorScrollContainerRef.current)
-                    savedScrollTopRef.current = editorScrollContainerRef.current.scrollTop;
-                }}
               >
                 <SegmentedEditor
                   content={content}
