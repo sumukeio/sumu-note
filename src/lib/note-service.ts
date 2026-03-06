@@ -330,12 +330,12 @@ export async function moveNoteToFolder(
 }
 
 /**
- * 批量移动笔记到某文件夹
+ * 批量移动笔记到某文件夹（targetFolderId 为 null 表示移动到根目录）
  */
 export async function moveNotesToFolder(
   ids: string[],
   userId: string,
-  targetFolderId: string
+  targetFolderId: string | null
 ): Promise<void> {
   if (!ids.length) return;
   const { error } = await supabase

@@ -3,8 +3,10 @@
 /**
  * 编辑态 UI：标题、标签、SegmentedEditor、预览/禅模式、工具栏、链接/标签补全、版本历史入口、撤回、底部栏。
  * 状态与保存/Realtime 由 NoteManager 通过 props 传入并协调。
+ * 移动端：单画布模式（Task 7.1.x）- 标题即画布首行、默认阅读态点击进入编辑。
  */
-import { useRef } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { createPortal } from "react-dom";
 import {
   Trash2,
@@ -26,7 +28,10 @@ import {
   History,
   Table,
   Search,
+  List,
 } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
+import { extractOutline, type OutlineItem } from "@/lib/outline-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
@@ -38,6 +43,18 @@ import type { Note } from "@/types/note";
 import type { Match } from "@/lib/search-utils";
 
 export type SaveStatus = "saved" | "saving" | "error" | "unsaved";
+
+/** 弱化展示用：格式化为「更新于 x月x日」 */
+function formatMetaDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  } catch {
+    return "";
+  }
+}
 
 export interface NoteEditorProps {
   title: string;
@@ -213,6 +230,33 @@ export function NoteEditor(props: NoteEditorProps) {
   const moreButtonRef = moreButtonRefProp ?? localMoreButtonRef;
   const moreMenuPortalRef = moreMenuPortalRefProp ?? localMoreMenuPortalRef;
 
+  const isMobile = useIsMobile();
+  const [isMobileReadingMode, setIsMobileReadingMode] = useState(true);
+  const [tocOpen, setTocOpen] = useState(false);
+  const { toast } = useToast();
+  const outline = useMemo(() => extractOutline(content), [content]);
+
+  useEffect(() => {
+    if (currentNote?.id) setIsMobileReadingMode(true);
+  }, [currentNote?.id]);
+
+  useEffect(() => {
+    if (currentNote?.id) setTocOpen(false);
+  }, [currentNote?.id]);
+
+  // Task 7.6.2：首次进入编辑态（移动端）轻提示，仅一次
+  useEffect(() => {
+    if (!isMobileReadingMode && isMobile && typeof window !== "undefined") {
+      const seen = localStorage.getItem("sumunote:editor-hint-seen");
+      if (!seen) {
+        toast({ title: "向下输入正文，输入 / 可插入内容", duration: 4000 });
+        localStorage.setItem("sumunote:editor-hint-seen", "1");
+      }
+    }
+  }, [isMobileReadingMode, isMobile, toast]);
+
+  const showMobileReadingView = isMobile && isMobileReadingMode && !previewMode;
+
   return (
     <>
       <div
@@ -228,15 +272,20 @@ export function NoteEditor(props: NoteEditorProps) {
       >
         <header
           className={cn(
-            "px-2 sm:px-4 h-14 flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur shrink-0",
-            zenMode && "bg-background border-b border-border/40"
+            "px-2 sm:px-4 h-14 flex items-center border-b border-border/50 bg-background/50 backdrop-blur shrink-0",
+            zenMode && "bg-background border-b border-border/40",
+            isMobile && "grid grid-cols-[1fr_auto_1fr] gap-2"
           )}
         >
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* 左：返回 */}
+          <div className="flex items-center shrink-0">
             <Button
               variant="ghost"
               size="sm"
-              className="text-muted-foreground hover:text-foreground"
+              className={cn(
+                "text-muted-foreground hover:text-foreground",
+                isMobile && "min-w-[44px] min-h-[44px] p-0 justify-center touch-manipulation"
+              )}
               onClick={() => {
                 if (saveStatus === "unsaved") {
                   saveNote(title, content, isPinned, isPublished, tags);
@@ -244,10 +293,135 @@ export function NoteEditor(props: NoteEditorProps) {
                 setTimeout(() => onBack(), 100);
               }}
             >
-              <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1" />
+              <ArrowLeft className={cn("w-4 h-4 sm:w-5 sm:h-5", !isMobile && "sm:mr-1")} />
               <span className="hidden sm:inline">返回</span>
             </Button>
           </div>
+          {/* 中：文档状态（移动端居中；桌面端在右侧区域） */}
+          {isMobile ? (
+            <>
+              <div className="flex items-center justify-center min-w-0 overflow-hidden">
+                <div className="flex items-center gap-1.5 text-xs truncate">
+                  {!isOnlineState ? (
+                    <span className="text-red-500 shrink-0" title="离线">离线</span>
+                  ) : saveStatus === "saving" ? (
+                    <span className="text-blue-500 shrink-0 flex items-center gap-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      保存中
+                    </span>
+                  ) : saveStatus === "error" ? (
+                    <span className="text-red-500 shrink-0">保存失败</span>
+                  ) : saveStatus === "unsaved" ? (
+                    <span className="text-yellow-500 shrink-0 flex items-center gap-1">
+                      <Pencil className="w-3.5 h-3.5 animate-pulse" />
+                      未保存
+                    </span>
+                  ) : (
+                    <span className="text-green-500 shrink-0 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      已保存
+                    </span>
+                  )}
+                </div>
+              </div>
+              {/* 右：写作模式时显示完成，否则显示更多 */}
+              <div className="flex items-center justify-end shrink-0">
+                {isMobileWritingMode ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (saveStatus === "unsaved") {
+                        saveNote(title, content, isPinned, isPublished, tags);
+                      }
+                      onExitMobileWritingMode?.();
+                      if (isMobile) setIsMobileReadingMode(true);
+                    }}
+                    className={cn(
+                      "min-w-[44px] min-h-[44px] px-3 rounded-full text-sm font-medium touch-manipulation flex items-center justify-center gap-1.5",
+                      saveStatus === "unsaved"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-accent/80 text-accent-foreground"
+                    )}
+                  >
+                    {saveStatus === "saving" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4" />
+                    )}
+                    <span>完成</span>
+                  </button>
+                ) : (
+                  <div ref={moreMenuRef}>
+                    <button
+                      ref={moreButtonRef}
+                      type="button"
+                      className={cn(
+                        "shrink-0 inline-flex items-center justify-center h-11 w-11 rounded-full text-sm font-medium transition-all duration-150 ease-out bg-transparent hover:bg-accent/50 active:bg-accent active:scale-95 touch-manipulation min-w-[44px] min-h-[44px]",
+                        moreMenuOpen && "bg-accent/60"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        if (moreButtonRef.current) {
+                          const rect = moreButtonRef.current.getBoundingClientRect();
+                          setMenuPosition({
+                            top: rect.bottom + 8,
+                            right: window.innerWidth - rect.right,
+                          });
+                        }
+                        setMoreMenuOpen((prev) => !prev);
+                      }}
+                      onTouchEnd={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        if (moreButtonRef.current) {
+                          const rect = moreButtonRef.current.getBoundingClientRect();
+                          setMenuPosition({
+                            top: rect.bottom + 8,
+                            right: window.innerWidth - rect.right,
+                          });
+                        }
+                        setMoreMenuOpen((prev) => !prev);
+                      }}
+                    >
+                      <MoreVertical
+                        className={cn(
+                          "w-5 h-5 transition-colors duration-150 text-foreground/80",
+                          moreMenuOpen && "text-foreground"
+                        )}
+                      />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {moreMenuOpen && typeof document !== "undefined" && createPortal(
+                <NoteEditorMoreMenu
+                  zenMode={zenMode}
+                  canRevert={canRevert}
+                  isPinned={isPinned}
+                  isPublished={isPublished}
+                  previewMode={previewMode}
+                  setPreviewMode={setPreviewMode}
+                  moreMenuPortalRef={moreMenuPortalRef}
+                  menuPosition={menuPosition}
+                  setMoreMenuOpen={setMoreMenuOpen}
+                  fileInputRef={fileInputRef}
+                  onInsertTable={onInsertTable}
+                  togglePin={togglePin}
+                  togglePublish={togglePublish}
+                  setFindReplaceMode={setFindReplaceMode}
+                  setIsFindReplaceOpen={setIsFindReplaceOpen}
+                  onRevertToLastSaved={onRevertToLastSaved}
+                  onOpenVersionHistory={onOpenVersionHistory}
+                  onDeleteCurrentNote={onDeleteCurrentNote}
+                  setZenMode={setZenMode}
+                  outline={outline}
+                  onOpenToc={() => { setMoreMenuOpen(false); setTocOpen(true); }}
+                />,
+                document.body
+              )}
+            </>
+          ) : (
           <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-hide flex-1 justify-end min-w-0">
             <input
               type="file"
@@ -417,6 +591,8 @@ export function NoteEditor(props: NoteEditorProps) {
                   canRevert={canRevert}
                   isPinned={isPinned}
                   isPublished={isPublished}
+                  previewMode={previewMode}
+                  setPreviewMode={setPreviewMode}
                   moreMenuPortalRef={moreMenuPortalRef}
                   menuPosition={menuPosition}
                   setMoreMenuOpen={setMoreMenuOpen}
@@ -430,6 +606,8 @@ export function NoteEditor(props: NoteEditorProps) {
                   onOpenVersionHistory={onOpenVersionHistory}
                   onDeleteCurrentNote={onDeleteCurrentNote}
                   setZenMode={setZenMode}
+                  outline={outline}
+                  onOpenToc={() => { setMoreMenuOpen(false); setTocOpen(true); }}
                 />,
                 document.body
               )}
@@ -527,15 +705,16 @@ export function NoteEditor(props: NoteEditorProps) {
               )}
             </div>
           </div>
+          )}
         </header>
         <div
           ref={editorScrollContainerRef}
           className={cn(
             // 移动端避免“嵌套滚动容器”导致键盘/输入时回顶：整页只保留一个主要滚动容器
-            "flex-1 mx-auto w-full flex flex-col overflow-y-auto overscroll-contain min-h-0 pb-20 sm:pb-0",
+            "flex-1 mx-auto w-full flex flex-col overflow-y-auto overscroll-contain min-h-0 pb-20 sm:pb-0 note-content",
             zenMode
               ? "max-w-4xl px-8 py-12"
-              : "max-w-full sm:max-w-3xl md:max-w-4xl p-3 sm:p-4 md:p-8"
+              : "max-w-full sm:max-w-3xl md:max-w-[var(--note-max-width)] p-3 sm:p-4 md:p-8"
           )}
           style={
             {
@@ -566,41 +745,91 @@ export function NoteEditor(props: NoteEditorProps) {
               mode={findReplaceMode}
             />
           )}
-          <div className="relative group">
-            <Input
-              value={title}
-              onChange={(e) => {
-                const newTitle = e.target.value;
-                onContentChange(newTitle, content);
-              }}
+          {showMobileReadingView ? (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setIsMobileReadingMode(false)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  requestAnimationFrame(() => {
-                    const firstTextarea = editorScrollContainerRef.current?.querySelector("textarea");
-                    if (firstTextarea) {
-                      (firstTextarea as HTMLTextAreaElement).focus();
-                    }
-                  });
+                  setIsMobileReadingMode(false);
                 }
               }}
-              placeholder="无标题"
-              className={cn(
-                "border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto transition-all duration-200 relative",
-                zenMode ? "text-4xl md:text-5xl font-bold py-6" : "text-3xl md:text-4xl font-bold py-4",
-                previewMode && "opacity-80 pointer-events-none",
-                title.startsWith("# ") && "text-2xl md:text-3xl",
-                title.startsWith("## ") && "text-xl md:text-2xl",
-                title.startsWith("### ") && "text-lg md:text-xl"
+              className="cursor-pointer select-text touch-manipulation outline-none focus:outline-none"
+              aria-label="点击进入编辑"
+            >
+              <div
+                className={cn(
+                  "text-2xl font-bold mb-1 text-foreground",
+                  !title && "text-muted-foreground"
+                )}
+              >
+                {title || "无标题"}
+              </div>
+              {/* Task 7.5.2：标题下元信息行（弱化展示） */}
+              {(currentNote?.updated_at || currentNote?.created_at || tags.length > 0) && (
+                <div className="text-xs text-muted-foreground mb-3 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                  {formatMetaDate(currentNote?.updated_at || currentNote?.created_at) && (
+                    <span>更新于 {formatMetaDate(currentNote?.updated_at || currentNote?.created_at)}</span>
+                  )}
+                  {tags.length > 0 && (
+                    <span>{tags.map((t) => `#${t}`).join(" ")}</span>
+                  )}
+                </div>
               )}
-            />
-            <div
-              className={cn(
-                "absolute bottom-0 left-0 h-0.5 bg-primary transition-all duration-200 w-0 opacity-0 group-focus-within:w-full group-focus-within:opacity-100"
+              <div className="text-base leading-[1.75] tracking-[0.01em] text-foreground/95">
+                <MarkdownRenderer content={content || ""} outline={outline} />
+              </div>
+              <div className="h-20" />
+            </div>
+          ) : (
+            <>
+              {/* Task 7.6.1：标题区 focus-within 弱化表达可编辑 */}
+              <div className={cn("relative rounded-md transition-colors focus-within:bg-muted/10", isMobile && "group")}>
+                <Input
+                  value={title}
+                  onChange={(e) => {
+                    const newTitle = e.target.value;
+                    onContentChange(newTitle, content);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      requestAnimationFrame(() => {
+                        const firstTextarea = editorScrollContainerRef.current?.querySelector("textarea");
+                        if (firstTextarea) {
+                          (firstTextarea as HTMLTextAreaElement).focus();
+                        }
+                      });
+                    }
+                  }}
+                  placeholder={isMobile ? "写个标题" : "无标题"}
+                  className={cn(
+                    "border-none shadow-none px-0 focus-visible:ring-0 bg-transparent h-auto transition-all duration-200 relative",
+                    zenMode ? "text-4xl md:text-5xl font-bold py-6" : "text-3xl md:text-4xl font-bold py-4",
+                    isMobile && "text-2xl font-bold py-3 mb-1",
+                    previewMode && "opacity-80 pointer-events-none",
+                    title.startsWith("# ") && "text-2xl md:text-3xl",
+                    title.startsWith("## ") && "text-xl md:text-2xl",
+                    title.startsWith("### ") && "text-lg md:text-xl"
+                  )}
+                />
+                {!isMobile && (
+                  <div
+                    className={cn(
+                      "absolute bottom-0 left-0 h-0.5 bg-primary transition-all duration-200 w-0 opacity-0 group-focus-within:w-full group-focus-within:opacity-100"
+                    )}
+                  />
+                )}
+              </div>
+              {/* Task 7.5.2：编辑态标题下元信息行 */}
+              {!zenMode && !isMobileWritingMode && formatMetaDate(currentNote?.updated_at || currentNote?.created_at) && (
+                <div className="text-xs text-muted-foreground mb-1">
+                  更新于 {formatMetaDate(currentNote?.updated_at || currentNote?.created_at)}
+                </div>
               )}
-            />
-          </div>
-          {!zenMode && !isMobileWritingMode && (
+              {!zenMode && !isMobileWritingMode && (
             <div className="flex flex-wrap items-center gap-2 mb-3">
               {tags.map((tag) => (
                 <button
@@ -637,12 +866,13 @@ export function NoteEditor(props: NoteEditorProps) {
           )}
           {previewMode ? (
             <div className="flex-1 mt-4 animate-in fade-in duration-200">
-              <MarkdownRenderer content={content} />
+              <MarkdownRenderer content={content} outline={outline} />
               <div className="h-20" />
             </div>
           ) : (
+            /* Task 7.6.1：正文区 focus-within 弱化表达可编辑 */
             <div
-              className={cn("relative mt-4 flex flex-col")}
+              className={cn("relative mt-4 flex flex-col rounded-md transition-colors focus-within:bg-muted/5 focus-within:border-l-2 focus-within:border-primary/20")}
             >
               <div
                 className={cn(
@@ -653,14 +883,17 @@ export function NoteEditor(props: NoteEditorProps) {
                 <SegmentedEditor
                   content={content}
                   onChange={onSegmentedEditorChange}
-                  placeholder="开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."
+                  placeholder={isMobile ? "向下输入正文，输入 / 可插入内容…" : "开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."}
                   className={cn(
                     "w-full min-h-[200px]",
                     zenMode
                       ? "text-lg leading-[1.75] tracking-[0.01em]"
                       : "text-base sm:text-lg leading-[1.75] tracking-[0.01em]"
                   )}
+                  textareaClassName="border-0 focus-visible:ring-0 shadow-none bg-transparent"
                   onInsertTable={onInsertTable}
+                  isMobileWritingMode={isMobile && isMobileWritingMode}
+                  onRequestInsertImage={() => fileInputRef.current?.click()}
                 />
               </div>
               {linkMenuOpen && linkCandidates.length > 0 && (
@@ -723,6 +956,8 @@ export function NoteEditor(props: NoteEditorProps) {
               )}
             </div>
           )}
+            </>
+          )}
         </div>
       </div>
       {/* 移动端底部工具栏 */}
@@ -733,6 +968,7 @@ export function NoteEditor(props: NoteEditorProps) {
               saveNote(title, content, isPinned, isPublished, tags);
             }
             onExitMobileWritingMode?.();
+            if (isMobile) setIsMobileReadingMode(true);
           }}
           className={cn(
             "fixed bottom-4 right-4 z-50 sm:hidden rounded-full shadow-lg touch-manipulation px-4 py-3 flex items-center gap-2 text-sm font-medium",
@@ -838,6 +1074,49 @@ export function NoteEditor(props: NoteEditorProps) {
           </div>
         </div>
       )}
+      {/* Task 7.5.3：目录弹层，点击项滚动到对应标题并关闭 */}
+      {tocOpen && outline.length > 0 && typeof document !== "undefined" && createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[99998] bg-black/20 backdrop-blur-sm"
+            onClick={() => setTocOpen(false)}
+            onTouchEnd={() => setTocOpen(false)}
+            aria-hidden
+          />
+          <div
+            className="fixed z-[99999] py-2 max-h-[60vh] overflow-y-auto w-56 rounded-2xl bg-popover/95 backdrop-blur-xl border border-border/40 shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200"
+            style={{
+              top: `${menuPosition.top}px`,
+              right: `${Math.max(12, menuPosition.right)}px`,
+              maxWidth: "calc(100vw - 24px)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/50">目录</div>
+            <nav className="py-1">
+              {outline.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={cn(
+                    "w-full text-left px-4 py-2 text-sm hover:bg-accent/50 active:bg-accent transition-colors duration-150 touch-manipulation",
+                    item.level === 1 && "font-medium",
+                    item.level === 2 && "pl-5 text-foreground/90",
+                    item.level === 3 && "pl-6 text-foreground/80 text-xs"
+                  )}
+                  onClick={() => {
+                    document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth" });
+                    setTocOpen(false);
+                  }}
+                >
+                  {item.text}
+                </button>
+              ))}
+            </nav>
+          </div>
+        </>,
+        document.body
+      )}
     </>
   );
 }
@@ -848,6 +1127,8 @@ function NoteEditorMoreMenu({
   canRevert,
   isPinned,
   isPublished,
+  previewMode,
+  setPreviewMode,
   moreMenuPortalRef,
   menuPosition,
   setMoreMenuOpen,
@@ -861,11 +1142,15 @@ function NoteEditorMoreMenu({
   onOpenVersionHistory,
   onDeleteCurrentNote,
   setZenMode,
+  outline,
+  onOpenToc,
 }: {
   zenMode: boolean;
   canRevert: boolean;
   isPinned: boolean;
   isPublished: boolean;
+  previewMode: boolean;
+  setPreviewMode: (v: boolean) => void;
   moreMenuPortalRef: React.RefObject<HTMLDivElement | null>;
   menuPosition: { top: number; right: number };
   setMoreMenuOpen: (v: boolean | ((p: boolean) => boolean)) => void;
@@ -879,6 +1164,8 @@ function NoteEditorMoreMenu({
   onOpenVersionHistory: () => void;
   onDeleteCurrentNote: () => void;
   setZenMode: (v: boolean | ((p: boolean) => boolean)) => void;
+  outline: OutlineItem[];
+  onOpenToc: () => void;
 }) {
   return (
     <>
@@ -902,6 +1189,54 @@ function NoteEditorMoreMenu({
         onTouchStart={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
       >
+        {outline.length > 0 && (
+          <button
+            className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
+            onClick={() => { onOpenToc(); }}
+          >
+            <List className="w-4 h-4" />
+            <span>目录</span>
+          </button>
+        )}
+        <button
+          className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
+          onClick={() => {
+            setPreviewMode(!previewMode);
+            setMoreMenuOpen(false);
+          }}
+        >
+          {previewMode ? (
+            <>
+              <PenLine className="w-4 h-4" />
+              <span>编辑</span>
+            </>
+          ) : (
+            <>
+              <Eye className="w-4 h-4" />
+              <span>预览</span>
+            </>
+          )}
+        </button>
+        <button
+          className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
+          onClick={() => {
+            setZenMode((v) => !v);
+            setMoreMenuOpen(false);
+          }}
+        >
+          {zenMode ? (
+            <>
+              <Minimize2 className="w-4 h-4" />
+              <span>退出专注模式</span>
+            </>
+          ) : (
+            <>
+              <Maximize2 className="w-4 h-4" />
+              <span>专注模式</span>
+            </>
+          )}
+        </button>
+        <div className="h-px bg-border/50 my-1.5 mx-2" />
         {!zenMode && (
           <>
             <button
@@ -990,25 +1325,6 @@ function NoteEditorMoreMenu({
         >
           <Trash2 className="w-4 h-4" />
           <span>删除笔记</span>
-        </button>
-        <button
-          className="w-full px-4 py-3 text-left text-sm hover:bg-accent/50 active:bg-accent flex items-center gap-3 touch-manipulation transition-colors duration-150"
-          onClick={() => {
-            setZenMode((v) => !v);
-            setMoreMenuOpen(false);
-          }}
-        >
-          {zenMode ? (
-            <>
-              <Minimize2 className="w-4 h-4" />
-              <span>退出专注模式</span>
-            </>
-          ) : (
-            <>
-              <Maximize2 className="w-4 h-4" />
-              <span>进入专注模式</span>
-            </>
-          )}
         </button>
       </div>
     </>

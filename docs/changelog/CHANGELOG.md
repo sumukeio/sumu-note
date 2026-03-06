@@ -2,7 +2,35 @@
 
 本文档记录项目的重要更新和修复。
 
-## 2026-02-XX（最新）
+## 2026-03-XX（最新）
+
+### ✨ 笔记编辑页体验优化（Task 7.5.2～7.6.2）
+
+#### 1. 标题下元信息行 ✅
+- 在标题下方增加弱化元信息：更新时间（如「更新于 3月5日」）、标签（`#tag1 #tag2`）
+- 阅读态与编辑态均展示，小字号、`text-muted-foreground`，不抢夺正文注意力
+- 文件：`src/components/NoteEditor.tsx`
+
+#### 2. 长文目录/大纲 ✅
+- 解析正文中的 H1/H2/H3 标题，在「更多」菜单中提供「目录」入口
+- 点击目录项可平滑滚动到对应标题（`scrollIntoView`）
+- 标题渲染时设置 `id` 与 `extractOutline` 一致，支持锚点跳转
+- 文件：`src/lib/outline-utils.ts`、`src/components/MarkdownRenderer.tsx`、`src/components/NoteEditor.tsx`
+
+#### 3. 聚焦态/选区态样式 ✅
+- 去掉标题与正文的默认粗边框
+- 通过 `focus-within:bg-muted/10`（标题）、`focus-within:bg-muted/5` 与 `focus-within:border-l-2`（正文）表达可编辑
+- SegmentedEditor 支持 `textareaClassName` 覆盖 border/ring，由外层 focus-within 表达
+- 文件：`src/components/NoteEditor.tsx`、`src/components/SegmentedEditor.tsx`
+
+#### 4. Placeholder 与首次轻提示 ✅
+- 标题 placeholder「写个标题」、正文「向下输入正文，输入 / 可插入内容…」
+- 移动端首次进入编辑态时显示一次 Toast 轻提示，`localStorage` 标记 `sumunote:editor-hint-seen` 仅显示一次
+- 文件：`src/components/NoteEditor.tsx`
+
+---
+
+## 2026-02-XX（历史）
 
 ### ✨ 新功能：Toast + 撤销（Undo）
 

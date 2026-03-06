@@ -13,14 +13,22 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { detectTableAtCursor, tableDataToMarkdown } from "@/lib/table-utils";
+import { cn } from "@/lib/utils";
 import FloatingToolbar from "@/components/FloatingToolbar";
+import MobileEditorToolbar, { type InsertBlockType } from "@/components/MobileEditorToolbar";
 
 interface SegmentedEditorProps {
   content: string;
   onChange: (newContent: string) => void;
   placeholder?: string;
   className?: string;
+  /** 应用到内部 Textarea 的 className（如去掉边框/ring，由外层 focus-within 表达可编辑） */
+  textareaClassName?: string;
   onInsertTable?: () => void; // 插入表格的回调，用于直接创建表格段
+  /** 移动端写作模式（键盘弹出）时显示键盘上方工具栏 */
+  isMobileWritingMode?: boolean;
+  /** 移动端工具栏点击「图片」时由父组件打开 file input */
+  onRequestInsertImage?: () => void;
 }
 
 interface Segment {
@@ -40,7 +48,10 @@ export default function SegmentedEditor({
   onChange,
   placeholder,
   className,
+  textareaClassName,
   onInsertTable,
+  isMobileWritingMode = false,
+  onRequestInsertImage,
 }: SegmentedEditorProps) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map());
@@ -564,6 +575,57 @@ export default function SegmentedEditor({
     setToolbarPosition(null);
   }, [updateTextSegment]);
 
+  // 在光标处插入块（移动端工具栏「插入」用）
+  const insertBlockAtCursor = useCallback(
+    (segmentIndex: number, blockType: InsertBlockType) => {
+      const textarea = textareaRefs.current.get(segmentIndex);
+      if (!textarea) return;
+      const pos = textarea.selectionStart;
+      const value = textarea.value;
+      let insert = "";
+      let newCursorOffset = 0;
+      switch (blockType) {
+        case "heading":
+          insert = "\n## ";
+          newCursorOffset = insert.length;
+          break;
+        case "list":
+          insert = "\n- ";
+          newCursorOffset = insert.length;
+          break;
+        case "todo":
+          insert = "\n- [ ] ";
+          newCursorOffset = insert.length;
+          break;
+        case "quote":
+          insert = "\n> ";
+          newCursorOffset = insert.length;
+          break;
+        case "code":
+          insert = "\n```\n\n```";
+          newCursorOffset = pos + 5; // 光标在中间空行
+          break;
+        case "link":
+          insert = "[链接](https://example.com)";
+          newCursorOffset = pos + 2; // 选中「链接」
+          break;
+        case "image":
+          // 由 onRequestInsertImage 处理
+          return;
+        default:
+          return;
+      }
+      const newValue = value.substring(0, pos) + insert + value.substring(pos);
+      updateTextSegment(segmentIndex, newValue, textarea);
+      setTimeout(() => {
+        const cursor = Math.min(newCursorOffset, newValue.length);
+        textarea.setSelectionRange(cursor, blockType === "link" ? cursor + 2 : cursor);
+        textarea.focus();
+      }, 0);
+    },
+    [updateTextSegment]
+  );
+
   // 更新表格段
   const updateTableSegment = useCallback(
     (index: number, newTableData: string[][]) => {
@@ -779,7 +841,7 @@ export default function SegmentedEditor({
         value={content}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={className}
+        className={cn(className, textareaClassName)}
       />
     );
   }
@@ -791,7 +853,7 @@ export default function SegmentedEditor({
         value={content}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={className}
+        className={cn(className, textareaClassName)}
       />
     );
   }
@@ -1176,34 +1238,52 @@ export default function SegmentedEditor({
                 }
               }}
               placeholder={segmentIndex === 0 ? placeholder : undefined}
-              className="w-full min-h-[120px] resize-none overflow-hidden"
+              className={cn("w-full min-h-[120px] resize-none overflow-hidden", textareaClassName)}
               style={{
-                // 内容区域优化：行高 1.75，字间距 0.01em
-                lineHeight: '1.75',
-                letterSpacing: '0.01em',
-                // 段落间距：通过 margin-bottom 实现
-                marginBottom: '1.5rem'
+                lineHeight: 'var(--note-line-height)',
+                letterSpacing: 'var(--note-letter-spacing)',
+                marginBottom: 'var(--note-paragraph-spacing)',
               }}
             />
           );
         })}
       </div>
 
-      {/* 浮动工具栏 */}
-      <FloatingToolbar
-        selectedText={selectedText}
-        position={toolbarPosition}
-        context={toolbarContext}
+      {/* 浮动工具栏（移动端写作模式下由键盘上方工具栏替代，不重复显示） */}
+      {!isMobileWritingMode && (
+        <FloatingToolbar
+          selectedText={selectedText}
+          position={toolbarPosition}
+          context={toolbarContext}
+          onFormat={(type) => {
+            if (activeTextareaIndexRef.current !== null) {
+              formatText(activeTextareaIndexRef.current, type);
+            }
+          }}
+          onClose={() => {
+            setSelectedText("");
+            setToolbarPosition(null);
+            setToolbarContext('text');
+          }}
+        />
+      )}
+
+      {/* 移动端键盘上方常驻编辑工具栏（Task 7.3.x） */}
+      <MobileEditorToolbar
+        visible={isMobileWritingMode}
+        hasSelection={!!selectedText.trim()}
         onFormat={(type) => {
           if (activeTextareaIndexRef.current !== null) {
             formatText(activeTextareaIndexRef.current, type);
           }
         }}
-        onClose={() => {
-          setSelectedText("");
-          setToolbarPosition(null);
-          setToolbarContext('text');
+        onInsertBlock={(type) => {
+          const idx = activeTextareaIndexRef.current ?? 0;
+          if (segments[idx]?.type === "text") {
+            insertBlockAtCursor(idx, type);
+          }
         }}
+        onInsertImage={onRequestInsertImage}
       />
 
       {/* 应用内部的链接跳转确认弹窗 */}

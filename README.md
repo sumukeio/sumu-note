@@ -7,7 +7,7 @@ SumuNote 是一个现代化的 Web 笔记应用，专注于极简设计、流畅
 ## ✨ 核心功能
 
 ### 📝 笔记管理
-- **Markdown 编辑器**：实时预览、语法高亮、自动保存
+- **Markdown 编辑器**：实时预览、语法高亮、自动保存、分段编辑（文本 + 表格）
 - **文件夹组织**：多层级文件夹管理，清晰分类
 - **笔记操作**：创建、编辑、删除、复制、重命名、置顶
 - **图片上传**：支持图片上传到 Supabase Storage
@@ -49,6 +49,7 @@ SumuNote 是一个现代化的 Web 笔记应用，专注于极简设计、流畅
 - **回收站**：删除的笔记可恢复，支持彻底删除
 - **暗色模式**：支持亮色/暗色主题切换
 - **ZEN 专注模式**：编辑页面一键进入/退出专注模式，放大编辑区域、隐藏部分干扰元素
+- **长文目录**：包含 H1/H2/H3 的笔记可在「更多」菜单中打开目录，快速跳转到对应标题
 
 ### 🔐 身份认证
 - **邮箱密码登录**：传统邮箱+密码登录/注册
@@ -112,7 +113,9 @@ sumu-note/
 │   │   ├── AuthModal.tsx      # 登录/注册弹窗
 │   │   ├── FolderManager.tsx  # 文件夹管理
 │   │   ├── NoteManager.tsx    # 笔记管理
-│   │   ├── MarkdownRenderer.tsx # Markdown 渲染（支持双向链接）
+│   │   ├── MarkdownRenderer.tsx # Markdown 渲染（支持双向链接、标题锚点）
+│   │   ├── NoteEditor.tsx       # 笔记编辑页（标题、标签、SegmentedEditor、目录等）
+│   │   ├── SegmentedEditor.tsx  # 分段编辑器（文本段 + 表格段）
 │   │   ├── MindNoteManager.tsx # 思维笔记管理（列表页）
 │   │   ├── MindNoteEditor.tsx  # 思维笔记编辑器
 │   │   ├── MindNode.tsx       # 思维笔记节点组件
@@ -126,7 +129,8 @@ sumu-note/
 │       ├── version-history.ts # 版本历史管理
 │       ├── offline-storage.ts # 离线存储管理
 │       ├── mind-note-storage.ts # 思维笔记数据存储
-│       └── mind-note-utils.ts # 思维笔记工具函数
+│       ├── mind-note-utils.ts   # 思维笔记工具函数
+│       └── outline-utils.ts     # 目录解析（H1/H2/H3 提取，用于长文跳转）
 ├── docs/                      # 文档
 │   ├── sql/                   # SQL 脚本
 │   │   ├── create_mind_notes_tables.sql
@@ -211,6 +215,12 @@ npm test:coverage    # 测试覆盖率
 - 自建服务器
 
 ## 📝 最近更新
+
+### 📝 笔记编辑页体验优化（2026-03）
+- **标题下元信息行**：在标题下方弱化展示更新时间（如「更新于 3月5日」）和标签（`#tag1 #tag2`），小字号、不抢正文注意力
+- **长文目录/大纲**：当笔记包含 H1/H2/H3 标题时，在「更多」菜单中提供「目录」入口，点击可展开目录列表并平滑滚动到对应标题
+- **聚焦态与弱化边框**：去掉标题与正文的默认粗边框，通过 `focus-within` 微弱底色/左边框表达可编辑，光标可见且稳定
+- **Placeholder 与首次轻提示**：标题 placeholder「写个标题」、正文「向下输入正文，输入 / 可插入内容…」；移动端首次进入编辑态时显示一次轻提示（localStorage 标记，仅一次）
 
 ### 📖 只读页面优化（2025-01-XX）
 - **Markdown 渲染**：只读预览页面使用 Markdown 渲染，支持完整的 Markdown 语法

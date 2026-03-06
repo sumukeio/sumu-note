@@ -38,6 +38,8 @@ import { createNoteVersion, getNoteVersions, type NoteVersion } from "@/lib/vers
 import { isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes } from "@/lib/offline-storage";
 import { NoteList } from "@/components/NoteList";
 import { NoteEditor } from "@/components/NoteEditor";
+import { MoveToFolderDialog, MOVE_TARGET_ROOT } from "@/components/MoveToFolderDialog";
+import { getFolderDescendantIds } from "@/lib/folder-utils";
 import { type Match } from "@/lib/search-utils";
 import type { Note, FolderItem } from "@/types/note";
 
@@ -1390,22 +1392,21 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       return;
     }
 
-    // 目标文件夹不能是被移动的文件夹本身
-    const targets = data.filter((f) => !folderIds.includes(f.id));
-    if (targets.length === 0) {
-      toast({
-        title: "没有可移动到的位置",
-        description: "没有可作为目标的其他文件夹",
-        variant: "default",
-      });
-      return;
+    // 获取所有文件夹，排除被移动的文件夹及其所有后代（防循环引用）
+    const allFolders = data as FolderItem[];
+    const excludeIds = new Set<string>(folderIds);
+    for (const fid of folderIds) {
+      const desc = getFolderDescendantIds(allFolders, fid);
+      desc.forEach((id) => excludeIds.add(id));
     }
+    const targets = allFolders.filter((f) => !excludeIds.has(f.id));
 
+    // 无其他文件夹时仍可移动到根目录
     setMoveSubfolderTargets(targets);
     setMoveSubfolderDialogOpen(true);
   };
 
-  const handleMoveSubfoldersToTarget = async (targetFolderId: string) => {
+  const handleMoveSubfoldersToTarget = async (targetFolderId: string | null) => {
     const ids = Array.from(selectedIds);
     const folderIds = ids.filter((id) => subFolders.some((f) => f.id === id));
     const noteIds = ids.filter((id) => notes.some((n) => n.id === id));
@@ -1414,11 +1415,12 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       return;
     }
 
-    // 先移动文件夹，再移动笔记
+    const isRoot = targetFolderId === null || targetFolderId === MOVE_TARGET_ROOT;
+
     if (folderIds.length > 0) {
       const { error: folderError } = await supabase
         .from("folders")
-        .update({ parent_id: targetFolderId })
+        .update({ parent_id: isRoot ? null : targetFolderId })
         .in("id", folderIds);
 
       if (folderError) {
@@ -1433,7 +1435,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
 
     if (noteIds.length > 0) {
       try {
-        await moveNotesToFolder(noteIds, userId, targetFolderId);
+        await moveNotesToFolder(noteIds, userId, isRoot ? null : targetFolderId);
       } catch (noteError: unknown) {
         toast({
           title: "移动失败",
@@ -1485,19 +1487,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       },
     });
 
-    // 记录“上次移动到”的目标文件夹
-    setLastMoveTargetId(targetFolderId);
+    setLastMoveTargetId(isRoot ? MOVE_TARGET_ROOT : targetFolderId!);
     if (typeof window !== "undefined" && userId) {
       try {
         const key = `sumunote:lastMoveFolder:${userId}`;
-        window.localStorage.setItem(key, targetFolderId);
+        window.localStorage.setItem(key, isRoot ? MOVE_TARGET_ROOT : targetFolderId!);
       } catch {
         // 忽略本地存储错误
       }
     }
 
     setMoveSubfolderDialogOpen(false);
-    // 刷新当前文件夹下的子文件夹和笔记列表
     fetchSubFolders();
     fetchNotes();
     exitSelectionMode();
@@ -1965,95 +1965,13 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         </Dialog>
 
       {/* 文件夹 / 笔记移动对话框 */}
-      <Dialog open={moveSubfolderDialogOpen} onOpenChange={setMoveSubfolderDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>移动到...</DialogTitle>
-            <DialogDescription>
-              选择要将选中的文件夹和笔记移动到哪个目标文件夹。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto py-2 space-y-3">
-            {/* 上次移动的快捷入口 */}
-            {lastMoveTargetId && (
-              (() => {
-                const lastTarget = moveSubfolderTargets.find(
-                  (f) => f.id === lastMoveTargetId
-                );
-                if (!lastTarget) return null;
-                return (
-                  <div className="border border-dashed border-border rounded-md p-2 space-y-1">
-                    <div className="text-[11px] text-muted-foreground">
-                      上次移动到
-                    </div>
-                    <Button
-                      variant="outline"
-                      className="justify-start h-auto py-2 text-sm"
-                      onClick={() => handleMoveSubfoldersToTarget(lastTarget.id)}
-                    >
-                      <Folder className="w-4 h-4 mr-2 text-yellow-500" />
-                      <span className="truncate">
-                        {lastTarget.name || "未命名文件夹"}
-                      </span>
-                    </Button>
-                  </div>
-                );
-              })()
-            )}
-
-            {/* 按层级展开的目标文件夹列表 */}
-            <div className="space-y-1">
-              {(() => {
-                if (!moveSubfolderTargets.length) {
-                  return (
-                    <p className="text-xs text-muted-foreground px-1">
-                      暂无可用的目标文件夹。
-                    </p>
-                  );
-                }
-
-                // 构建层级树（全部展开）
-                const byParent = new Map<string | null, FolderItem[]>();
-                for (const f of moveSubfolderTargets) {
-                  const key = f.parent_id ?? null;
-                  if (!byParent.has(key)) byParent.set(key, []);
-                  byParent.get(key)!.push(f);
-                }
-                for (const group of byParent.values()) {
-                  group.sort((a, b) =>
-                    (a.name || "").localeCompare(b.name || "", "zh-CN")
-                  );
-                }
-
-                const items: { folder: FolderItem; depth: number }[] = [];
-                const walk = (parentId: string | null, depth: number) => {
-                  const children = byParent.get(parentId) || [];
-                  for (const child of children) {
-                    items.push({ folder: child, depth });
-                    walk(child.id, depth + 1);
-                  }
-                };
-                walk(null, 0);
-
-                return items.map(({ folder, depth }) => (
-                  <Button
-                    key={folder.id}
-                    variant="outline"
-                    className="justify-start h-auto py-2 text-sm"
-                    style={{ paddingLeft: 12 + depth * 16 }}
-                    onClick={() => handleMoveSubfoldersToTarget(folder.id)}
-                  >
-                    <Folder className="w-4 h-4 mr-2 text-yellow-500" />
-                    <span className="truncate">
-                      {folder.name || "未命名文件夹"}
-                    </span>
-                  </Button>
-                ));
-              })()}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <MoveToFolderDialog
+        open={moveSubfolderDialogOpen}
+        onOpenChange={setMoveSubfolderDialogOpen}
+        targets={moveSubfolderTargets}
+        lastMoveTargetId={lastMoveTargetId}
+        onSelect={handleMoveSubfoldersToTarget}
+      />
 
         {/* 重命名对话框 */}
         {/* 新建文件夹对话框 */}
