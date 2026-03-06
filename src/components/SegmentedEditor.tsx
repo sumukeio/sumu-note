@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, X, Trash2, Minus, XCircle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +13,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { detectTableAtCursor, tableDataToMarkdown } from "@/lib/table-utils";
+import { detectTableAtCursor, tableDataToMarkdown, htmlTableToMarkdown } from "@/lib/table-utils";
+import { getNoteTableLayout, upsertNoteTableLayout } from "@/lib/note-service";
 import { cn } from "@/lib/utils";
 import FloatingToolbar from "@/components/FloatingToolbar";
 import MobileEditorToolbar, { type InsertBlockType } from "@/components/MobileEditorToolbar";
@@ -29,6 +31,11 @@ interface SegmentedEditorProps {
   isMobileWritingMode?: boolean;
   /** 移动端工具栏点击「图片」时由父组件打开 file input */
   onRequestInsertImage?: () => void;
+  /** 用于表格列宽元数据（note_table_layouts） */
+  userId?: string;
+  noteId?: string;
+  /** 虚拟滚动时使用的滚动容器（外层唯一滚动容器） */
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 interface Segment {
@@ -52,6 +59,9 @@ export default function SegmentedEditor({
   onInsertTable,
   isMobileWritingMode = false,
   onRequestInsertImage,
+  userId,
+  noteId,
+  scrollContainerRef,
 }: SegmentedEditorProps) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map());
@@ -73,12 +83,28 @@ export default function SegmentedEditor({
   const lastInputTimeRef = useRef<number>(0); // 记录最后一次输入的时间
   const restoreCursorTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 光标恢复的防抖定时器
   const isTypingRef = useRef<boolean>(false); // 标记是否正在输入
+  const isComposingRef = useRef<boolean>(false); // 中文输入法组合态，期间不执行 setSelectionRange 避免打断
   
   // 浮动工具栏相关状态
   const [selectedText, setSelectedText] = useState("");
   const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number; bottom?: number } | null>(null);
   const [toolbarContext, setToolbarContext] = useState<'text' | 'code' | 'table'>('text');
   const selectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 表格列宽布局（按表格出现顺序 tableKey = `t{index}`）
+  const [tableLayouts, setTableLayouts] = useState<
+    Record<string, { colWidths: number[]; freezeFirstCol: boolean; loaded?: boolean }>
+  >({});
+  const layoutSaveTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const resizeStateRef = useRef<{
+    active: boolean;
+    tableKey: string;
+    colIndex: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const getTableKeyByOrder = useCallback((tableOrderIndex: number) => `t${tableOrderIndex}`, []);
 
   const flushPendingUpdate = useCallback(() => {
     const markdown = pendingUpdateRef.current;
@@ -109,6 +135,13 @@ export default function SegmentedEditor({
     if (next > el.clientHeight) {
       el.style.height = `${next}px`;
     }
+  }, []);
+
+  const normalizeColWidths = useCallback((colCount: number, widths: number[]) => {
+    const safe = widths.filter((n) => Number.isFinite(n) && n > 40);
+    const next = safe.slice(0, colCount);
+    while (next.length < colCount) next.push(160);
+    return next;
   }, []);
 
   const extractTokenAtCursor = useCallback((text: string, cursor: number) => {
@@ -379,6 +412,65 @@ export default function SegmentedEditor({
   // 用于跟踪是否是由内部操作触发的更新（避免循环更新）
   const isInternalUpdateRef = useRef(false);
 
+  // 富文本 HTML 转 Markdown（清理标签、保留结构）
+  const htmlToMarkdown = useCallback((html: string): string => {
+    if (!html.trim()) return '';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const walk = (node: Node): string => {
+      if (node.nodeType === Node.TEXT_NODE) return (node.textContent || '').replace(/\s+/g, ' ');
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      const el = node as HTMLElement;
+      const tag = el.tagName.toLowerCase();
+      const children = Array.from(el.childNodes).map(walk).join('');
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      switch (tag) {
+        case 'strong':
+        case 'b':
+          return `**${text}**`;
+        case 'em':
+        case 'i':
+          return `*${text}*`;
+        case 'h1':
+          return `# ${text}\n`;
+        case 'h2':
+          return `## ${text}\n`;
+        case 'h3':
+          return `### ${text}\n`;
+        case 'h4':
+        case 'h5':
+        case 'h6':
+          return `${'#'.repeat(parseInt(tag[1], 10))} ${text}\n`;
+        case 'p':
+        case 'div':
+          return `${text}\n`;
+        case 'br':
+          return '\n';
+        case 'ul':
+          return Array.from(el.querySelectorAll(':scope > li'))
+            .map((li) => `- ${(li.textContent || '').trim()}`)
+            .join('\n') + '\n';
+        case 'ol':
+          return Array.from(el.querySelectorAll(':scope > li'))
+            .map((li, i) => `${i + 1}. ${(li.textContent || '').trim()}`)
+            .join('\n') + '\n';
+        case 'blockquote':
+          return (el.textContent || '')
+            .split('\n')
+            .filter((l) => l.trim())
+            .map((l) => `> ${l.trim()}`)
+            .join('\n') + '\n';
+        case 'code':
+          return el.closest('pre') ? text : `\`${text}\``;
+        case 'a':
+          return `[${text}](${el.getAttribute('href') || '#'})`;
+        default:
+          return children || text;
+      }
+    };
+    return walk(tmp).replace(/\n{3,}/g, '\n\n').trim();
+  }, []);
+
   // 恢复光标位置和滚动位置（仅移动端：键盘弹出/收起后恢复；PC 端不执行，避免抖动）
   const restoreCursorPosition = useCallback(() => {
     // 移动端浏览器对键盘/可视区域的滚动有自己的策略。
@@ -397,6 +489,77 @@ export default function SegmentedEditor({
     setSegments(parsed);
   }, [content, parseContent]);
 
+  // 加载当前内容里所有表格的布局元数据
+  useEffect(() => {
+    if (!userId || !noteId) return;
+    const keys: string[] = [];
+    let order = 0;
+    for (const seg of segments) {
+      if (seg.type === "table") {
+        keys.push(getTableKeyByOrder(order));
+        order++;
+      }
+    }
+    if (keys.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const key of keys) {
+        if (tableLayouts[key]?.loaded) continue;
+        const row = await getNoteTableLayout(userId, noteId, key);
+        if (cancelled) return;
+        if (row) {
+          setTableLayouts((prev) => ({
+            ...prev,
+            [key]: {
+              colWidths: Array.isArray(row.col_widths) ? row.col_widths : [],
+              freezeFirstCol: !!row.freeze_first_col,
+              loaded: true,
+            },
+          }));
+        } else {
+          setTableLayouts((prev) => ({
+            ...prev,
+            [key]: prev[key] ?? { colWidths: [], freezeFirstCol: true, loaded: true },
+          }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, noteId, segments, getTableKeyByOrder]);
+
+  const scheduleSaveLayout = useCallback(
+    (tableKey: string) => {
+      if (!userId || !noteId) return;
+      const timer = layoutSaveTimersRef.current.get(tableKey);
+      if (timer) clearTimeout(timer);
+      const nextTimer = setTimeout(() => {
+        const layout = tableLayouts[tableKey];
+        if (!layout) return;
+        upsertNoteTableLayout({
+          userId,
+          noteId,
+          tableKey,
+          colWidths: layout.colWidths,
+          freezeFirstCol: layout.freezeFirstCol ?? true,
+        });
+      }, 400);
+      layoutSaveTimersRef.current.set(tableKey, nextTimer);
+    },
+    [userId, noteId, tableLayouts]
+  );
+
+  useEffect(() => {
+    return () => {
+      for (const t of layoutSaveTimersRef.current.values()) clearTimeout(t);
+      layoutSaveTimersRef.current.clear();
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (restoreCursorTimeoutRef.current) clearTimeout(restoreCursorTimeoutRef.current);
@@ -414,7 +577,7 @@ export default function SegmentedEditor({
     
     // 只在 segments 长度变化时恢复光标位置（避免内容变化时频繁恢复）
     // 并且只在非输入状态下恢复（避免快速输入时抖动）
-    if (segments.length !== segmentsLengthRef.current && savedCursorStateRef.current && !hasRestoredRef.current && !isTypingRef.current) {
+    if (segments.length !== segmentsLengthRef.current && savedCursorStateRef.current && !hasRestoredRef.current && !isTypingRef.current && !isComposingRef.current) {
       segmentsLengthRef.current = segments.length;
       hasRestoredRef.current = true;
       // 清除之前的恢复定时器
@@ -473,16 +636,16 @@ export default function SegmentedEditor({
       scheduleFlushPendingUpdate();
       
       // 在输入停止后（300ms 无输入）标记为非输入状态，并恢复光标
+      // 组合态（中文输入法）期间不执行，避免打断输入
       setTimeout(() => {
         const timeSinceLastInput = Date.now() - lastInputTimeRef.current;
-        if (timeSinceLastInput >= 300) {
+        if (timeSinceLastInput >= 300 && !isComposingRef.current) {
           isTypingRef.current = false;
-          // 延迟恢复光标，确保 DOM 已更新
           if (restoreCursorTimeoutRef.current) {
             clearTimeout(restoreCursorTimeoutRef.current);
           }
           restoreCursorTimeoutRef.current = setTimeout(() => {
-            restoreCursorPosition();
+            if (!isComposingRef.current) restoreCursorPosition();
           }, 50);
         }
       }, 300);
@@ -640,6 +803,62 @@ export default function SegmentedEditor({
     },
     [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
+
+  const beginResize = useCallback(
+    (tableKey: string, colIndex: number, startX: number, startWidth: number) => {
+      resizeStateRef.current = {
+        active: true,
+        tableKey,
+        colIndex,
+        startX,
+        startWidth,
+      };
+    },
+    []
+  );
+
+  const applyResizeDelta = useCallback((clientX: number) => {
+    const st = resizeStateRef.current;
+    if (!st?.active) return;
+    const dx = clientX - st.startX;
+    const nextWidth = Math.max(60, Math.round(st.startWidth + dx));
+    setTableLayouts((prev) => {
+      const cur = prev[st.tableKey] ?? { colWidths: [], freezeFirstCol: true };
+      const colWidths = [...cur.colWidths];
+      colWidths[st.colIndex] = nextWidth;
+      return { ...prev, [st.tableKey]: { ...cur, colWidths } };
+    });
+  }, []);
+
+  const endResize = useCallback(() => {
+    const st = resizeStateRef.current;
+    if (!st?.active) return;
+    resizeStateRef.current = null;
+    scheduleSaveLayout(st.tableKey);
+  }, [scheduleSaveLayout]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => applyResizeDelta(e.clientX);
+    const onUp = () => endResize();
+    const onTouchMove = (e: TouchEvent) => {
+      if (!e.touches[0]) return;
+      applyResizeDelta(e.touches[0].clientX);
+    };
+    const onTouchEnd = () => endResize();
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", onTouchEnd);
+    window.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onTouchMove as any);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [applyResizeDelta, endResize]);
 
   // 在表格后面插入一个新的文本段，方便继续输入文字
   const handleAddTextAfterTable = useCallback(
@@ -834,6 +1053,24 @@ export default function SegmentedEditor({
     [segmentsToMarkdown, scheduleFlushPendingUpdate]
   );
 
+  // 虚拟滚动 hooks 必须在任何 early-return 之前调用，避免 hooks 顺序变化导致崩溃
+  const shouldVirtualize =
+    content.length > 50_000 || segments.length > 120;
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? segments.length : 0,
+    getScrollElement: () => scrollContainerRef?.current ?? null,
+    estimateSize: (index) => (segments[index]?.type === "table" ? 420 : 200),
+    overscan: 10,
+    rangeExtractor: (range) => {
+      const base = defaultRangeExtractor(range);
+      const active = activeTextareaIndexRef.current;
+      if (typeof active === "number" && active >= 0 && active < segments.length) {
+        base.push(active);
+      }
+      return Array.from(new Set(base)).sort((a, b) => a - b);
+    },
+  });
+
   // 如果内容为空，显示单个 Textarea
   if (!content.trim() && segments.length === 0) {
     return (
@@ -860,22 +1097,50 @@ export default function SegmentedEditor({
 
   return (
     <>
-      <div 
+      <div
         className={className || ""}
         style={{
           // 内容区域优化：段落间距 1.5rem
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1.5rem'
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.5rem",
+          ...(shouldVirtualize
+            ? { height: `${virtualizer.getTotalSize()}px`, position: "relative" as const }
+            : {}),
         }}
       >
-        {segments.map((segment, segmentIndex) => {
-        if (segment.type === "table" && segment.tableData) {
+        {(shouldVirtualize ? virtualizer.getVirtualItems().map((v) => v.index) : segments.map((_, i) => i)).map((segmentIndex) => {
+        const segment = segments[segmentIndex];
+        if (segment?.type === "table" && segment.tableData) {
+          // tableOrder：该表格在当前内容中的出现顺序（只统计 table 段）
+          let tableOrder = 0;
+          for (let i = 0; i < segmentIndex; i++) {
+            if (segments[i]?.type === "table") tableOrder++;
+          }
+          const tableKey = getTableKeyByOrder(tableOrder);
+          const layout = tableLayouts[tableKey] ?? { colWidths: [], freezeFirstCol: true };
+          const colCount = segment.tableData[0]?.length ?? 0;
+          const colWidths = normalizeColWidths(colCount, layout.colWidths);
+          const freezeFirstCol = layout.freezeFirstCol ?? true;
+          const wrapStyle = shouldVirtualize
+            ? {
+                position: "absolute" as const,
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualizer.getVirtualItems().find((x) => x.index === segmentIndex)?.start ?? 0}px)`,
+              }
+            : undefined;
+          const vItem = shouldVirtualize
+            ? virtualizer.getVirtualItems().find((x) => x.index === segmentIndex)
+            : null;
           return (
             <div
               key={segmentIndex}
+              ref={shouldVirtualize && vItem ? virtualizer.measureElement : undefined}
               className="my-4 border border-border rounded-lg p-4 bg-card relative group shadow-sm hover:shadow-md transition-shadow duration-200"
               style={{
+                ...(wrapStyle ?? {}),
                 // 内容区域优化：表格样式优化（圆角、阴影、悬停效果）
                 borderRadius: '0.5rem',
                 marginBottom: '1.5rem' // 段落间距
@@ -893,15 +1158,28 @@ export default function SegmentedEditor({
               >
                 <Trash2 className="w-4 h-4" />
               </button>
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse border border-border">
-                  <thead>
+              <div className="relative">
+                <div
+                  className="overflow-x-auto overflow-y-visible"
+                  style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                >
+                  <table className="min-w-max border-collapse border border-border w-full">
+                    <colgroup>
+                      {colWidths.map((w, idx) => (
+                        <col key={idx} style={{ width: `${w}px` }} />
+                      ))}
+                      <col style={{ width: "48px" }} />
+                    </colgroup>
+                    <thead className="sticky top-0 z-10 bg-muted/95 dark:bg-muted/95">
                     {segment.tableData.length > 0 && (
                       <tr>
                         {segment.tableData[0].map((_, colIndex) => (
                           <th
                             key={colIndex}
-                            className="border border-border p-2 bg-accent/50 relative group/col"
+                            className={cn(
+                              "border border-border p-1.5 sm:p-2 bg-accent/50 relative group/col whitespace-nowrap",
+                              freezeFirstCol && colIndex === 0 && "sticky left-0 z-20 bg-accent/80"
+                            )}
                           >
                             <input
                               type="text"
@@ -909,8 +1187,22 @@ export default function SegmentedEditor({
                               onChange={(e) =>
                                 handleTableCellChange(segmentIndex, 0, colIndex, e.target.value)
                               }
-                              className="w-full bg-transparent border-none outline-none text-sm font-semibold"
+                              className="w-full min-w-0 bg-transparent border-none outline-none text-xs sm:text-sm font-semibold"
                               placeholder="表头"
+                            />
+                            {/* 列宽拖拽手柄 */}
+                            <div
+                              className="absolute top-0 right-0 h-full w-2 cursor-col-resize opacity-0 group-hover/col:opacity-100 touch-none"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                beginResize(tableKey, colIndex, e.clientX, colWidths[colIndex] ?? 160);
+                              }}
+                              onTouchStart={(e) => {
+                                const t = e.touches[0];
+                                if (!t) return;
+                                beginResize(tableKey, colIndex, t.clientX, colWidths[colIndex] ?? 160);
+                              }}
                             />
                             {segment.tableData![0].length > 1 && (
                               <button
@@ -927,7 +1219,7 @@ export default function SegmentedEditor({
                             )}
                           </th>
                         ))}
-                        <th className="border border-border p-2 bg-accent/50 w-8">
+                        <th className="border border-border p-1.5 sm:p-2 bg-accent/50 w-8 shrink-0">
                           <button
                             onClick={(e) => {
                               e.preventDefault();
@@ -949,7 +1241,10 @@ export default function SegmentedEditor({
                         {row.map((cell, colIndex) => (
                           <td
                             key={colIndex}
-                            className="border border-border p-2 relative group/row hover:bg-accent/30 transition-colors duration-150"
+                            className={cn(
+                              "border border-border p-1.5 sm:p-2 relative group/row hover:bg-accent/30 transition-colors duration-150",
+                              freezeFirstCol && colIndex === 0 && "sticky left-0 z-10 bg-card"
+                            )}
                           >
                             <input
                               type="text"
@@ -962,7 +1257,7 @@ export default function SegmentedEditor({
                                   e.target.value
                                 )
                               }
-                              className="w-full bg-transparent border-none outline-none text-sm"
+                              className="w-full min-w-0 bg-transparent border-none outline-none text-xs sm:text-sm"
                               placeholder="单元格"
                             />
                             {colIndex === 0 && segment.tableData!.length > 2 && (
@@ -980,7 +1275,7 @@ export default function SegmentedEditor({
                             )}
                           </td>
                         ))}
-                        <td className="border border-border p-2 w-8 group/row">
+                        <td className="border border-border p-1.5 sm:p-2 w-8 group/row shrink-0">
                           <button
                             onClick={(e) => {
                               e.preventDefault();
@@ -998,7 +1293,7 @@ export default function SegmentedEditor({
                     <tr>
                       <td
                         colSpan={(segment.tableData[0]?.length || 1) + 1}
-                        className="border border-border p-2"
+                        className="border border-border p-1.5 sm:p-2"
                       >
                         <button
                           type="button"
@@ -1017,6 +1312,11 @@ export default function SegmentedEditor({
                     </tr>
                   </tbody>
                 </table>
+                </div>
+                <div
+                  className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-card to-transparent sm:hidden"
+                  aria-hidden
+                />
               </div>
 
               {/* 在表格后继续输入文字的按钮 */}
@@ -1038,9 +1338,25 @@ export default function SegmentedEditor({
         }
 
           // 文本段
+          const wrapStyle = shouldVirtualize
+            ? {
+                position: "absolute" as const,
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualizer.getVirtualItems().find((x) => x.index === segmentIndex)?.start ?? 0}px)`,
+              }
+            : undefined;
+          const vItem = shouldVirtualize
+            ? virtualizer.getVirtualItems().find((x) => x.index === segmentIndex)
+            : null;
           return (
-            <Textarea
+            <div
               key={segmentIndex}
+              ref={shouldVirtualize && vItem ? virtualizer.measureElement : undefined}
+              style={wrapStyle}
+            >
+              <Textarea
               ref={(el) => {
                 if (el) {
                   textareaRefs.current.set(segmentIndex, el);
@@ -1052,18 +1368,18 @@ export default function SegmentedEditor({
               value={segment.content}
               onChange={(e) => {
                 const textarea = e.currentTarget;
-                // 在更新前立即保存当前光标位置（确保获取到最新的光标位置）
                 const currentCursorPos = textarea.selectionStart ?? 0;
-                // 更新内容
                 updateTextSegment(segmentIndex, textarea.value, textarea);
                 autoResizeTextarea(textarea);
-                // 在下一个事件循环中恢复光标位置（避免被 React 的重渲染重置）
+                // 组合态（中文输入法）期间不执行 setSelectionRange，避免打断输入导致光标跳动
                 requestAnimationFrame(() => {
-                  if (textarea && currentCursorPos <= textarea.value.length) {
+                  if (textarea && !isComposingRef.current && currentCursorPos <= textarea.value.length) {
                     textarea.setSelectionRange(currentCursorPos, currentCursorPos);
                   }
                 });
               }}
+              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionEnd={() => { isComposingRef.current = false; }}
               onSelect={(e) => {
                 // 保存选择位置
                 const textarea = e.currentTarget;
@@ -1162,52 +1478,59 @@ export default function SegmentedEditor({
                 }
               }}
               onPaste={(e) => {
-                // 内容辅助功能：格式化助手 - 粘贴时自动清理格式
+                // 粘贴优化：表格、富文本转换（图片相关不做）
                 e.preventDefault();
                 const pastedText = e.clipboardData.getData('text/plain');
+                const htmlData = e.clipboardData.getData('text/html');
                 const textarea = e.currentTarget;
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
                 const currentValue = textarea.value;
-                
-                // 如果粘贴的是 HTML，尝试转换为 Markdown（简单处理）
-                const htmlData = e.clipboardData.getData('text/html');
+
                 let processedText = pastedText;
-                if (htmlData) {
-                  // 简单的 HTML 到 Markdown 转换
-                  processedText = htmlData
-                    .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')
-                    .replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**')
-                    .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
-                    .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')
-                    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n')
-                    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n')
-                    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n')
-                    .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n')
-                    .replace(/<br[^>]*>/gi, '\n')
-                    .replace(/<[^>]+>/g, '') // 移除其他 HTML 标签
-                    .replace(/&nbsp;/g, ' ')
-                    .replace(/&amp;/g, '&')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&quot;/g, '"')
-                    .trim();
-                  
-                  // 如果转换后为空，使用纯文本
-                  if (!processedText) {
-                    processedText = pastedText;
+
+                // 1. 优先检测 HTML 中的 <table>，转为 Markdown 表格
+                if (htmlData && /<table[\s\S]*?<\/table>/i.test(htmlData)) {
+                  const tableMatch = htmlData.match(/<table[\s\S]*?<\/table>/i);
+                  if (tableMatch) {
+                    const md = htmlTableToMarkdown(tableMatch[0]);
+                    if (md.trim()) {
+                      processedText = md;
+                    }
                   }
                 }
-                
-                // 清理多余的空白行（保留最多一个空行）
-                processedText = processedText.replace(/\n{3,}/g, '\n\n');
-                
-                // 插入处理后的文本
+                // 2. 若无 HTML 表格，检测 text/plain 中的制表符分隔内容（Excel 粘贴）
+                else if (pastedText && processedText === pastedText) {
+                  const lines = pastedText.split(/\r?\n/).filter((l) => l.trim());
+                  if (lines.length >= 1) {
+                    const rows = lines.map((l) => l.split('\t').map((c) => c.trim()));
+                    const colCount = Math.max(...rows.map((r) => r.length));
+                    const hasMultipleCols = colCount >= 2 || rows.some((r) => r.length >= 2);
+                    const hasMultipleRows = rows.length >= 2;
+                    if (hasMultipleCols || hasMultipleRows) {
+                      const normalized = rows.map((r) => {
+                        const row = [...r];
+                        while (row.length < colCount) row.push('');
+                        return row;
+                      });
+                      const md = tableDataToMarkdown(normalized);
+                      if (md.trim()) processedText = md;
+                    }
+                  }
+                }
+                // 3. 若有 HTML 但无表格，做富文本优化
+                else if (htmlData && processedText === pastedText) {
+                  processedText = htmlToMarkdown(htmlData);
+                  if (!processedText.trim()) processedText = pastedText;
+                }
+
+                // 清理多余空白行
+                processedText = processedText.replace(/\n{3,}/g, '\n\n').trim();
+
                 const newValue = currentValue.substring(0, start) + processedText + currentValue.substring(end);
                 updateTextSegment(segmentIndex, newValue, textarea);
                 autoResizeTextarea(textarea);
-                
-                // 恢复光标位置
+
                 setTimeout(() => {
                   const newCursorPos = start + processedText.length;
                   textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -1244,7 +1567,8 @@ export default function SegmentedEditor({
                 letterSpacing: 'var(--note-letter-spacing)',
                 marginBottom: 'var(--note-paragraph-spacing)',
               }}
-            />
+              />
+            </div>
           );
         })}
       </div>

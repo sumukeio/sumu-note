@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Input } from "@/components/ui/input";
 import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { vibrateSelection } from "@/lib/haptics";
 
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
@@ -61,6 +62,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
 
   useEffect(() => { if (userId) fetchFolders(); }, [userId]);
 
+
   const handleCreateFolder = async () => {
     setEditMode("create");
     setEditingFolder(null);
@@ -69,7 +71,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   };
 
   const toggleSelection = (id: string) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet); };
-  const handleTouchStart = (id: string) => { if (isSelectionMode) return; ignoreClickRef.current = false; timerRef.current = setTimeout(() => { const newSet = new Set(selectedIds); newSet.add(id); setSelectedIds(newSet); if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50); ignoreClickRef.current = true; }, 500); };
+  const handleTouchStart = (id: string) => { if (isSelectionMode) return; ignoreClickRef.current = false; timerRef.current = setTimeout(() => { const newSet = new Set(selectedIds); newSet.add(id); setSelectedIds(newSet); vibrateSelection(); ignoreClickRef.current = true; }, 500); };
   const handleTouchEnd = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
   const handleClick = (folder: any) => { if (ignoreClickRef.current) { ignoreClickRef.current = false; return; } if (isSelectionMode) { toggleSelection(folder.id); } else { onEnterFolder(folder.id, folder.name); } };
   const exitSelectionMode = () => setSelectedIds(new Set());
@@ -363,12 +365,22 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
                 </>
               ) : (
                 <>
-                  <Button size="sm" onClick={handleCreateFolder} variant="outline" className="sm:inline hidden">
-                    <Plus className="w-4 h-4 sm:mr-1"/>
-                    <span className="sm:inline hidden">新建</span>
-                  </Button>
-                  <Button size="icon" onClick={handleCreateFolder} variant="outline" className="sm:hidden">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="sm:inline-flex hidden gap-1"
+                    onClick={handleCreateFolder}
+                  >
                     <Plus className="w-4 h-4" />
+                    <span>新建</span>
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="default"
+                    className="sm:hidden min-w-10 min-h-10"
+                    onClick={handleCreateFolder}
+                  >
+                    <Plus className="w-5 h-5" />
                   </Button>
                 </>
               )}

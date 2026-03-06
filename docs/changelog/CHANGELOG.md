@@ -4,6 +4,56 @@
 
 ## 2026-03-XX（最新）
 
+### ✨ 11 项需求落地（1-11）与体验补齐（2026-03-06）
+
+#### 1) 撤销/重做快捷键 ✅
+- 普通笔记支持 Ctrl/Cmd + Z 撤销、Ctrl+Y/Cmd+Shift+Z 重做，多步撤销 + 重做栈
+- 文件：`src/components/NoteManager.tsx`
+
+#### 2) 粘贴优化（不含图片粘贴）✅
+- 支持 HTML `<table>` 与 TSV（Excel）粘贴转 Markdown 表格
+- 富文本粘贴清理（标题/列表/引用等基础结构）
+- 文件：`src/components/SegmentedEditor.tsx`、`src/lib/table-utils.ts`
+
+#### 3) 移动端输入稳定性 ✅
+- 中文输入法组合态期间避免 `setSelectionRange` 打断输入，降低光标跳动/失焦
+- 文件：`src/components/SegmentedEditor.tsx`
+
+#### 4) 新建按钮 UI 优化 ✅
+- 文件夹内（NoteList）PC 端合并为「新建」主按钮下拉
+- 根目录（FolderManager）新建按钮主色化，默认直接新建文件夹
+- 文件：`src/components/NoteList.tsx`、`src/components/FolderManager.tsx`
+
+#### 5) 移动端拇指可及 ✅
+- 列表页新增 FAB 下沉新建入口；编辑页底部保存入口保持可达（safe-area）
+- 文件：`src/components/NoteList.tsx`、`src/components/NoteEditor.tsx`
+
+#### 6) 触觉反馈 ✅
+- 新增统一封装 `haptics`，在勾选/保存/删除/长按多选等场景调用
+- 文件：`src/lib/haptics.ts`、`src/components/NoteManager.tsx`、`src/components/FolderManager.tsx`、`src/components/MindNoteManager.tsx`、`src/components/TodoItem.tsx`、`src/hooks/useNoteSave.ts`
+
+#### 7) 表格列宽拖拽 + 首列冻结 ✅（需执行 SQL 建表）
+- 编辑态表格支持列宽拖拽、首列冻结；预览态同步列宽/冻结
+- 新增表格布局元数据表脚本：`docs/sql/create_note_table_layouts.sql`
+- 文件：`src/lib/note-service.ts`、`src/components/SegmentedEditor.tsx`、`src/components/MarkdownRenderer.tsx`
+
+#### 8) 最近打开 ✅
+- Dashboard 增加“最近打开”（默认折叠，折叠状态本地持久化）
+- 文件：`src/lib/recent-notes.ts`、`src/app/dashboard/page.tsx`、`src/components/NoteManager.tsx`
+
+#### 9) 长文虚拟滚动 ✅
+- 预览态 Markdown 块级虚拟化；编辑态 SegmentedEditor 段级虚拟化（保留活动段避免丢焦）
+- 依赖：`@tanstack/react-virtual`
+- 文件：`src/components/MarkdownRenderer.tsx`、`src/components/SegmentedEditor.tsx`
+
+#### 10) 离线首屏缓存 ✅
+- 列表/内容缓存优先展示，网络回填；保存成功后写缓存
+- 文件：`src/lib/offline-storage.ts`、`src/components/NoteManager.tsx`、`src/hooks/useNoteSave.ts`
+
+#### 11) 启动速度优化 ✅
+- Dashboard 预取常用路由与最近笔记页
+- 文件：`src/app/dashboard/page.tsx`
+
 ### ✨ 笔记编辑页体验优化（Task 7.5.2～7.6.2）
 
 #### 1. 标题下元信息行 ✅

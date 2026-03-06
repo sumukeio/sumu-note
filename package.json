@@ -25,6 +25,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@supabase/supabase-js": "^2.86.0",
+    "@tanstack/react-virtual": "^3.13.21",
     "@types/localforage": "^0.0.33",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -39,6 +40,7 @@
     "react-dom": "^19.2.1",
     "react-markdown": "^10.1.0",
     "recharts": "^3.6.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

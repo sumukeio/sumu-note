@@ -5,6 +5,7 @@ import { CheckCircle2, Circle, Loader2, CheckSquare, Square } from "lucide-react
 import { type Todo } from "@/lib/todo-storage";
 import { formatDueDate, getPriorityColor, highlightText } from "@/lib/todo-utils";
 import { cn } from "@/lib/utils";
+import { vibrateShort } from "@/lib/haptics";
 import TodoDetail from "./TodoDetail";
 
 interface TodoItemProps {
@@ -48,7 +49,10 @@ export default function TodoItem({
         {/* 多选模式：显示复选框 */}
         {isSelectMode ? (
           <button
-            onClick={onToggleSelect}
+            onClick={() => {
+              vibrateShort();
+              onToggleSelect?.();
+            }}
             className="mt-0.5 shrink-0"
           >
             {isSelected ? (
@@ -60,7 +64,10 @@ export default function TodoItem({
         ) : (
           /* 普通模式：显示完成按钮 */
           <button
-            onClick={onToggleComplete}
+            onClick={() => {
+              vibrateShort();
+              onToggleComplete();
+            }}
             disabled={isCompleting}
             className="mt-0.5 shrink-0"
           >
@@ -78,8 +85,8 @@ export default function TodoItem({
         <div
           className="flex-1 min-w-0 cursor-pointer"
           onClick={() => {
-            // 多选模式下，点击任务内容切换选中状态，不打开详情
             if (isSelectMode) {
+              vibrateShort();
               onToggleSelect?.();
             } else {
               // 普通模式下，打开任务详情

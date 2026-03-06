@@ -35,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { createNoteVersion, getNoteVersions, type NoteVersion } from "@/lib/version-history";
-import { isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes } from "@/lib/offline-storage";
+import { cacheNoteContent, cacheNotesList, getCachedNotesList, isOnline, onNetworkStatusChange, savePendingSyncNote, syncPendingNotes } from "@/lib/offline-storage";
 import { NoteList } from "@/components/NoteList";
 import { NoteEditor } from "@/components/NoteEditor";
 import { MoveToFolderDialog, MOVE_TARGET_ROOT } from "@/components/MoveToFolderDialog";
@@ -44,6 +44,8 @@ import { type Match } from "@/lib/search-utils";
 import type { Note, FolderItem } from "@/types/note";
 
 import { TouchSensor, MouseSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { vibrateSelection, vibrateShort, vibrateSuccess, vibrateWarning } from "@/lib/haptics";
+import { recordRecentNote } from "@/lib/recent-notes";
 
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
@@ -74,6 +76,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   const [tagInput, setTagInput] = useState("");
   // 撤回栈：记录之前的编辑状态（多步撤回）
   const [undoStack, setUndoStack] = useState<{ title: string; content: string }[]>([]);
+  // 重做栈：撤销后将当前状态推入，重做时恢复
+  const [redoStack, setRedoStack] = useState<{ title: string; content: string }[]>([]);
   const lastChangeTimeRef = useRef<number | null>(null);
   const [zenMode, setZenMode] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
@@ -259,11 +263,24 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   // --- 获取数据 ---
   const fetchNotes = async () => {
       try {
+        // 缓存优先：先展示上次缓存的列表（首屏/离线更快）
+        const cached = await getCachedNotesList({ userId, folderId, showTrash });
+        if (cached && cached.length > 0) {
+          setNotes(cached as any);
+          setLoading(false);
+        }
         const data = await getNotes(userId, {
           folder_id: folderId,
           is_deleted: showTrash ? true : false,
         });
         setNotes(data);
+        // 写入列表缓存（仅摘要字段也可以，这里直接缓存整行以便离线快速展示）
+        cacheNotesList({
+          userId,
+          folderId,
+          showTrash,
+          notes: data as any,
+        }).catch(() => {});
       } catch (e) {
         console.error("fetchNotes error:", e);
       } finally {
@@ -390,6 +407,21 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       setCurrentNote(note); 
       setTitle(note.title || ""); 
       setContent(note.content || ""); 
+      // 最近打开：写入本地记录（不阻塞 UI）
+      recordRecentNote(userId, {
+        noteId: note.id,
+        folderId: note.folder_id ?? folderId ?? null,
+        title: note.title || "无标题",
+      });
+      // 内容缓存：打开时也写一份，保证离线可回看
+      cacheNoteContent({
+        userId,
+        noteId: note.id,
+        title: note.title || "",
+        content: note.content || "",
+        tags: note.tags || "",
+        updatedAt: note.updated_at || null,
+      }).catch(() => {});
       // 内容辅助功能：初始化字数统计
       const contentText = note.content || "";
       const chineseChars = (contentText.match(/[\u4e00-\u9fa5]/g) || []).length;
@@ -410,8 +442,9 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       } else {
         setTags([]);
       }
-      // 初始化撤回栈：清空历史
+      // 初始化撤回栈和重做栈：清空历史
       setUndoStack([]);
+      setRedoStack([]);
       setIsPinned(note.is_pinned || false); 
       setIsPublished(note.is_published || false);
       setSaveStatus('saved'); 
@@ -504,6 +537,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         lastChangeTimeRef.current != null ? now - lastChangeTimeRef.current : Infinity;
 
       if (timeSinceLast > 800) {
+        setRedoStack([]); // 有新的编辑时清空重做栈
         setUndoStack((prev) => {
           const snapshot = { title: prevTitle, content: prevContent };
           const last = prev[prev.length - 1];
@@ -668,6 +702,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     
     try {
       await setNotesDeleted([deleteNoteId], userId, true);
+      vibrateWarning();
       const deletedNoteId = deleteNoteId;
       toast({
         title: "已移入回收站",
@@ -763,6 +798,40 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     return () => window.removeEventListener('keydown', handleKeyDown); 
   }, [view, title, content, isPinned, isPublished, tags, saveNote]);
 
+  // 撤销/重做（需在快捷键 useEffect 之前定义）
+  const canRevert = view === "editor" && undoStack.length > 0;
+  const canRedo = view === "editor" && redoStack.length > 0;
+  const handleRevertToLastSaved = useCallback(() => {
+    if (!canRevert) return;
+    const currentSnapshot = { title, content };
+    setUndoStack((prev) => {
+      const next = [...prev];
+      const snapshot = next.pop();
+      if (snapshot) {
+        setRedoStack((r) => [...r.slice(-49), currentSnapshot]);
+        setTitle(snapshot.title);
+        setContent(snapshot.content);
+        saveNote(snapshot.title, snapshot.content, isPinned, isPublished, tags);
+      }
+      return next;
+    });
+  }, [canRevert, title, content, isPinned, isPublished, tags, saveNote]);
+  const handleRedo = useCallback(() => {
+    if (!canRedo) return;
+    const currentSnapshot = { title, content };
+    setRedoStack((prev) => {
+      const next = [...prev];
+      const snapshot = next.pop();
+      if (snapshot) {
+        setUndoStack((u) => [...u.slice(-49), currentSnapshot]);
+        setTitle(snapshot.title);
+        setContent(snapshot.content);
+        saveNote(snapshot.title, snapshot.content, isPinned, isPublished, tags);
+      }
+      return next;
+    });
+  }, [canRedo, title, content, isPinned, isPublished, tags, saveNote]);
+
   // 网络状态监听和自动同步
   useEffect(() => {
     // 初始化网络状态
@@ -809,6 +878,29 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modKey = isMac ? e.metaKey : e.ctrlKey;
+
+      // 焦点在对话框内时不拦截（让输入框的撤销/重做生效）
+      const target = e.target as HTMLElement;
+      if (target.closest?.('[role="dialog"]')) return;
+      
+      // Ctrl+Z / Cmd+Z：撤销
+      if (modKey && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        if (undoStack.length > 0) {
+          handleRevertToLastSaved();
+          toast({ title: "已撤销", duration: 1500 });
+        }
+        return;
+      }
+      // Ctrl+Y / Cmd+Y 或 Ctrl+Shift+Z / Cmd+Shift+Z：重做
+      if ((modKey && e.key === "y" && !e.shiftKey) || (modKey && e.shiftKey && e.key === "z")) {
+        e.preventDefault();
+        if (redoStack.length > 0) {
+          handleRedo();
+          toast({ title: "已重做", duration: 1500 });
+        }
+        return;
+      }
       
       // Ctrl+F 或 Cmd+F：打开查找
       if (modKey && e.key === "f" && !e.shiftKey) {
@@ -962,7 +1054,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [view, title, content, handleContentChange, handleInsertTable, toast]);
+  }, [view, title, content, handleContentChange, handleInsertTable, toast, undoStack, redoStack, handleRevertToLastSaved, handleRedo]);
 
   // 处理查找匹配项
   const handleFind = useCallback((newMatches: Match[], newIndex: number) => {
@@ -1116,24 +1208,6 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     };
   }, [view]);
 
-  // 撤回到上次保存版本
-  const canRevert = view === "editor" && undoStack.length > 0;
-
-  const handleRevertToLastSaved = async () => {
-    if (!canRevert) return;
-    setUndoStack((prev) => {
-      const next = [...prev];
-      const snapshot = next.pop();
-      if (snapshot) {
-        setTitle(snapshot.title);
-        setContent(snapshot.content);
-        // 撤回后也触发一次保存，保证与服务端一致
-        saveNote(snapshot.title, snapshot.content, isPinned, isPublished, tags);
-      }
-      return next;
-    });
-  };
-
   // 版本历史相关函数
   const loadVersions = async () => {
     if (!currentNote) return;
@@ -1175,7 +1249,13 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   };
 
   // --- 交互逻辑 ---
-  const toggleSelection = (id: string) => { const newSet = new Set(selectedIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedIds(newSet); };
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
+    vibrateShort();
+  };
   const handleTouchStart = (id: string, e?: React.TouchEvent) => {
     if (isSelectionMode) return;
     ignoreClickRef.current = false;
@@ -1189,7 +1269,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       const newSet = new Set(selectedIds);
       newSet.add(id);
       setSelectedIds(newSet);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+      vibrateSelection();
       ignoreClickRef.current = true;
     }, 500);
   };
@@ -1238,6 +1318,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       const newSet = new Set(selectedIds);
       newSet.add(id);
       setSelectedIds(newSet);
+      vibrateSelection();
       ignoreClickRef.current = true; // 让接下来的 click 被忽略（避免直接打开）
     }, 500);
   };
@@ -1339,6 +1420,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       }
 
       if (folderIds.length > 0 || noteIds.length > 0) {
+        vibrateShort();
         exitSelectionMode();
         toast({
           title: "删除成功",
@@ -1507,6 +1589,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     const ids = Array.from(selectedIds);
     try {
       await deleteNotes(ids, userId);
+      vibrateWarning();
       setNotes(prev => prev.filter(n => !selectedIds.has(n.id)));
       exitSelectionMode();
       toast({ title: "已永久删除", description: `${ids.length} 个笔记已被永久删除，无法找回`, variant: "destructive" });
@@ -1520,6 +1603,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     const ids = Array.from(selectedIds);
     try {
       await setNotesDeleted(ids, userId, false);
+      vibrateSuccess();
       setNotes(prev => prev.filter(n => !selectedIds.has(n.id)));
       exitSelectionMode();
       toast({ title: "已还原", description: `${ids.length} 个笔记已还原`, variant: "success" });
@@ -1683,6 +1767,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       return (
         <>
         <NoteEditor
+          userId={userId}
           title={title}
           content={content}
           tags={tags}

@@ -3,7 +3,8 @@
 import { useState, useCallback, useRef } from "react";
 import { updateNote } from "@/lib/note-service";
 import { createNoteVersion } from "@/lib/version-history";
-import { isOnline, savePendingSyncNote } from "@/lib/offline-storage";
+import { cacheNoteContent, isOnline, savePendingSyncNote } from "@/lib/offline-storage";
+import { vibrateSuccess } from "@/lib/haptics";
 import { buildNoteFingerprint } from "@/lib/note-fingerprint";
 import type { Note } from "@/types/note";
 
@@ -169,6 +170,7 @@ export function useNoteSave(
           }
           lastSaveTimeRef.current = new Date(latestUpdatedAt).getTime();
           if (showToast) {
+            vibrateSuccess();
             toast({
               title: "保存成功",
               description: "笔记已保存到云端",
@@ -176,6 +178,14 @@ export function useNoteSave(
               duration: 3000,
             });
           }
+          cacheNoteContent({
+            userId,
+            noteId: currentNote.id,
+            title: finalTitle,
+            content: currentContent,
+            tags: currentTags.join(","),
+            updatedAt: latestUpdatedAt,
+          }).catch(() => {});
           setTimeout(() => {
             isSavingRef.current = false;
             pendingSelfUpdateRef.current = null;
@@ -212,6 +222,14 @@ export function useNoteSave(
             });
             setSaveStatus("saved");
             lastSavedTimestampRef.current = now.toISOString();
+            cacheNoteContent({
+              userId,
+              noteId: currentNote.id,
+              title: finalTitle,
+              content: currentContent,
+              tags: currentTags.join(","),
+              updatedAt: now.toISOString(),
+            }).catch(() => {});
             lastSaveTimeRef.current = nowTimestamp;
             isSavingRef.current = false;
           } catch (err) {

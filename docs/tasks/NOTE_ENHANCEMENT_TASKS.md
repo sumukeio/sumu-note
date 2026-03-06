@@ -5,6 +5,28 @@
 
 ---
 
+## 📌 2026-03-06：11 项需求（1-11）落地同步
+
+> 用于记录近期已落地的跨文件改动（避免打乱原 Phase 结构）
+
+- ✅ **撤销/重做快捷键**：Ctrl/Cmd + Z / Ctrl+Y（含 Cmd+Shift+Z）
+- ✅ **粘贴优化（不含图片粘贴）**：HTML table / TSV → Markdown 表格 + 富文本清理
+- ✅ **移动端输入稳定性**：组合态期间避免 `setSelectionRange` 打断，减少光标跳动
+- ✅ **新建按钮 UI**：文件夹内新建下拉；根目录新建主按钮（默认新建文件夹）
+- ✅ **移动端拇指可及**：列表页 FAB；编辑页底部保存入口 safe-area 适配
+- ✅ **触觉反馈**：新增 `haptics` 并接入关键操作
+- ✅ **表格增强**：列宽拖拽 + 首列冻结（需执行 `docs/sql/create_note_table_layouts.sql`）
+- ✅ **最近打开**：Dashboard 最近打开（默认折叠，折叠状态本地持久化）
+- ✅ **长文优化**：预览态块级虚拟化 + 编辑态段级虚拟化
+- ✅ **离线首屏**：缓存优先展示、网络回填（列表/内容）
+- ✅ **启动优化**：Dashboard 路由/最近笔记页预取
+
+相关文件（节选）：
+- `src/components/NoteManager.tsx`、`src/components/NoteEditor.tsx`、`src/components/SegmentedEditor.tsx`
+- `src/components/MarkdownRenderer.tsx`、`src/app/dashboard/page.tsx`
+- `src/lib/offline-storage.ts`、`src/lib/recent-notes.ts`、`src/lib/haptics.ts`
+- `docs/sql/create_note_table_layouts.sql`
+
 ## 📋 Phase 0: Bug修复（P0 - 必须）
 
 ### Task 0.1: 修复滑动误触问题

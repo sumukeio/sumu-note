@@ -57,6 +57,7 @@ function formatMetaDate(iso: string | null | undefined): string {
 }
 
 export interface NoteEditorProps {
+  userId: string;
   title: string;
   content: string;
   tags: string[];
@@ -150,6 +151,7 @@ export interface NoteEditorProps {
 
 export function NoteEditor(props: NoteEditorProps) {
   const {
+    userId,
     title,
     content,
     tags,
@@ -209,16 +211,16 @@ export function NoteEditor(props: NoteEditorProps) {
     onFind,
     onReplace,
     onReplaceAll,
-  onInsertLink,
-  onInsertTag,
-  onTagsChangeWithSave,
-  onExitMobileWritingMode,
-  editorScrollContainerRef,
-  savedScrollTopRef,
-  moreMenuRef: moreMenuRefProp,
-  moreButtonRef: moreButtonRefProp,
-  moreMenuPortalRef: moreMenuPortalRefProp,
-  fileInputRef: fileInputRefProp,
+    onInsertLink,
+    onInsertTag,
+    onTagsChangeWithSave,
+    onExitMobileWritingMode,
+    editorScrollContainerRef,
+    savedScrollTopRef,
+    moreMenuRef: moreMenuRefProp,
+    moreButtonRef: moreButtonRefProp,
+    moreMenuPortalRef: moreMenuPortalRefProp,
+    fileInputRef: fileInputRefProp,
   } = props;
 
   const localFileInputRef = useRef<HTMLInputElement>(null);
@@ -779,7 +781,13 @@ export function NoteEditor(props: NoteEditorProps) {
                 </div>
               )}
               <div className="text-base leading-[1.75] tracking-[0.01em] text-foreground/95">
-                <MarkdownRenderer content={content || ""} outline={outline} />
+                <MarkdownRenderer
+                  content={content || ""}
+                  outline={outline}
+                  userId={userId}
+                  noteId={currentNote?.id ?? null}
+                  scrollContainerRef={editorScrollContainerRef as unknown as React.RefObject<HTMLElement | null>}
+                />
               </div>
               <div className="h-20" />
             </div>
@@ -866,7 +874,13 @@ export function NoteEditor(props: NoteEditorProps) {
           )}
           {previewMode ? (
             <div className="flex-1 mt-4 animate-in fade-in duration-200">
-              <MarkdownRenderer content={content} outline={outline} />
+              <MarkdownRenderer
+                content={content}
+                outline={outline}
+                userId={userId}
+                noteId={currentNote?.id ?? null}
+                scrollContainerRef={editorScrollContainerRef as unknown as React.RefObject<HTMLElement | null>}
+              />
               <div className="h-20" />
             </div>
           ) : (
@@ -894,6 +908,9 @@ export function NoteEditor(props: NoteEditorProps) {
                   onInsertTable={onInsertTable}
                   isMobileWritingMode={isMobile && isMobileWritingMode}
                   onRequestInsertImage={() => fileInputRef.current?.click()}
+                  userId={userId}
+                  noteId={currentNote?.id ?? undefined}
+                  scrollContainerRef={editorScrollContainerRef as unknown as React.RefObject<HTMLElement | null>}
                 />
               </div>
               {linkMenuOpen && linkCandidates.length > 0 && (

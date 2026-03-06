@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getNoteFolderId, searchNotes } from "@/lib/note-service";
+import { getRecentNotes, type RecentNoteEntry } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
 import FolderManager from "@/components/FolderManager"; // 引入
@@ -67,6 +68,8 @@ function DashboardPageContent() {
   const [selectedResultIndex, setSelectedResultIndex] = useState(-1);
   const [initialNoteId, setInitialNoteId] = useState<string | null>(null); // 从 URL 参数获取的笔记 ID
   const processedParamsRef = useRef<string>(""); // 记录已处理的参数组合，防止重复处理
+  const [recentNotes, setRecentNotes] = useState<RecentNoteEntry[]>([]);
+  const [recentCollapsed, setRecentCollapsed] = useState(true);
   
   // 防抖和请求取消相关
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -102,6 +105,55 @@ function DashboardPageContent() {
     };
     checkUser();
   }, [router]);
+
+  // 最近打开：本地读取（仅用于 dashboard 展示）
+  useEffect(() => {
+    if (!user?.id) return;
+    setRecentNotes(getRecentNotes(user.id));
+  }, [user?.id]);
+
+  // 最近打开：折叠状态（默认折叠，持久化到本地）
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const key = `sumunote:recent-notes-collapsed:${user.id}`;
+      const raw = window.localStorage.getItem(key);
+      if (raw === "0") setRecentCollapsed(false);
+      if (raw === "1") setRecentCollapsed(true);
+    } catch {
+      // ignore
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const key = `sumunote:recent-notes-collapsed:${user.id}`;
+      window.localStorage.setItem(key, recentCollapsed ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [user?.id, recentCollapsed]);
+
+  // 启动速度：预加载常用路由与最近笔记页
+  const hasPrefetchedRef = useRef(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (hasPrefetchedRef.current) return;
+    hasPrefetchedRef.current = true;
+
+    // 常用入口
+    router.prefetch("/dashboard/todos");
+    router.prefetch("/dashboard/mind-notes");
+    router.prefetch("/dashboard/stats");
+    router.prefetch("/dashboard/settings");
+
+    // 最近打开的笔记详情页（最多 8 个）
+    const recents = getRecentNotes(user.id).slice(0, 8);
+    for (const n of recents) {
+      router.prefetch(`/notes/${n.noteId}`);
+    }
+  }, [user?.id, router]);
 
   // 检测 URL 参数，如果有 note 参数，则自动进入对应的文件夹并打开编辑模式
   useEffect(() => {
@@ -427,6 +479,67 @@ function DashboardPageContent() {
 
       {/* 内容区 */}
       <main className="max-w-4xl mx-auto py-8 px-4">
+        {!searchQuery.trim() && recentNotes.length > 0 && (
+          <section className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <button
+                type="button"
+                className={cn(
+                  "text-xl sm:text-2xl font-bold flex items-center gap-2 truncate flex-1 min-w-0",
+                  "hover:text-foreground transition-colors"
+                )}
+                onClick={() => setRecentCollapsed((v) => !v)}
+                aria-expanded={!recentCollapsed}
+              >
+                <span className="truncate">最近打开</span>
+                <span className="text-xs font-normal text-muted-foreground bg-accent px-2 py-1 rounded-full shrink-0 hidden sm:inline">
+                  {recentNotes.length}
+                </span>
+                <span className={cn("transition-transform text-xs text-muted-foreground", recentCollapsed ? "" : "rotate-180")}>
+                  ▾
+                </span>
+              </button>
+              {!recentCollapsed && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs"
+                  onClick={() => setRecentNotes(getRecentNotes(user?.id || ""))}
+                  title="刷新"
+                >
+                  刷新
+                </Button>
+              )}
+            </div>
+            {!recentCollapsed && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {recentNotes.slice(0, 8).map((n) => (
+                  <button
+                    key={n.noteId}
+                    type="button"
+                    className="text-left rounded-lg border border-border bg-card/60 hover:bg-accent/60 transition-colors px-3 py-2"
+                    onClick={() => {
+                      const params = new URLSearchParams();
+                      params.set("note", n.noteId);
+                      if (n.folderId) params.set("folder", n.folderId);
+                      router.push(`/dashboard?${params.toString()}`);
+                    }}
+                  >
+                    <div className="font-medium truncate">{n.title || "无标题"}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {new Date(n.lastOpenedAt).toLocaleString("zh-CN", {
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
         {searchQuery.trim() ? (
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-2 mb-2">

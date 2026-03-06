@@ -5,6 +5,16 @@ import type { Note, NoteCreate, NoteUpdate } from "@/types/note";
 
 export type { Note, NoteCreate, NoteUpdate } from "@/types/note";
 
+export interface NoteTableLayout {
+  id: string;
+  user_id: string;
+  note_id: string;
+  table_key: string;
+  col_widths: number[];
+  freeze_first_col: boolean;
+  updated_at: string;
+}
+
 export class NoteServiceError extends Error {
   operation: string;
   constructor(operation: string, message: string, cause?: unknown) {
@@ -30,6 +40,64 @@ function throwNoteServiceError(operation: string, error: unknown, fallbackMessag
 export interface GetNotesOptions {
   folder_id: string;
   is_deleted?: boolean; // true=仅回收站, false=仅非删除, 不传=不过滤
+}
+
+export async function getNoteTableLayout(
+  userId: string,
+  noteId: string,
+  tableKey: string
+): Promise<NoteTableLayout | null> {
+  const { data, error } = await supabase
+    .from("note_table_layouts")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("note_id", noteId)
+    .eq("table_key", tableKey)
+    .maybeSingle();
+
+  if (error) {
+    // 如果表不存在/未部署，避免全局崩溃：交给调用方降级
+    console.warn("[note-service] getNoteTableLayout failed:", error);
+    return null;
+  }
+  if (!data) return null;
+
+  const row = data as any;
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    note_id: String(row.note_id),
+    table_key: String(row.table_key),
+    col_widths: Array.isArray(row.col_widths) ? row.col_widths : [],
+    freeze_first_col: Boolean(row.freeze_first_col),
+    updated_at: String(row.updated_at ?? ""),
+  };
+}
+
+export async function upsertNoteTableLayout(params: {
+  userId: string;
+  noteId: string;
+  tableKey: string;
+  colWidths: number[];
+  freezeFirstCol: boolean;
+}): Promise<void> {
+  const { userId, noteId, tableKey, colWidths, freezeFirstCol } = params;
+  const { error } = await supabase.from("note_table_layouts").upsert(
+    {
+      user_id: userId,
+      note_id: noteId,
+      table_key: tableKey,
+      col_widths: colWidths,
+      freeze_first_col: freezeFirstCol,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,note_id,table_key" }
+  );
+
+  if (error) {
+    // 同上：元数据失败不应影响编辑
+    console.warn("[note-service] upsertNoteTableLayout failed:", error);
+  }
 }
 
 /**

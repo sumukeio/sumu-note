@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import {
   Copy,
   Trash2,
@@ -15,6 +16,7 @@ import {
   RotateCcw,
   Search,
   Globe,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -313,6 +315,33 @@ export function NoteList({
   onCopy,
   sensors,
 }: NoteListProps) {
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const [newMenuFromFab, setNewMenuFromFab] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
+  const fabRef = useRef<HTMLDivElement>(null);
+
+  const openNewMenu = (fromFab: boolean) => {
+    setNewMenuFromFab(fromFab);
+    setNewMenuOpen(true);
+  };
+  const closeNewMenu = () => setNewMenuOpen(false);
+
+  useEffect(() => {
+    if (!newMenuOpen) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      const inMenu =
+        newMenuRef.current?.contains(target) || fabRef.current?.contains(target);
+      if (!inMenu) setNewMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [newMenuOpen]);
+
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div
@@ -378,42 +407,61 @@ export function NoteList({
                 )}
               </Button>
               {!showTrash && !isSelectionMode && (
-                <>
+                <div className="relative flex items-center gap-2" ref={newMenuRef}>
                   <Button
                     size="sm"
-                    onClick={onAddFolder}
-                    variant="outline"
-                    className="sm:inline hidden"
+                    variant="default"
+                    className="sm:inline-flex hidden gap-1"
+                    onClick={() => {
+                      setNewMenuFromFab(false);
+                      setNewMenuOpen((v) => !v);
+                    }}
                   >
-                    <Folder className="w-4 h-4 sm:mr-1" />
-                    <span className="sm:inline hidden">新文件夹</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={onAddNote}
-                    variant="outline"
-                    className="sm:inline hidden"
-                  >
-                    <Plus className="w-4 h-4 sm:mr-1" />
-                    <span className="sm:inline hidden">新笔记</span>
+                    <Plus className="w-4 h-4" />
+                    <span>新建</span>
+                    <ChevronDown className="w-3.5 h-3.5 opacity-70" />
                   </Button>
                   <Button
                     size="icon"
-                    onClick={onAddFolder}
                     variant="outline"
-                    className="sm:hidden"
-                  >
-                    <Folder className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    onClick={onAddNote}
-                    variant="outline"
-                    className="sm:hidden"
+                    className="sm:hidden min-w-9 min-h-9"
+                    onClick={() => {
+                      setNewMenuFromFab(false);
+                      setNewMenuOpen((v) => !v);
+                    }}
                   >
                     <Plus className="w-4 h-4" />
                   </Button>
-                </>
+                  {newMenuOpen && !newMenuFromFab && (
+                    <div
+                      className="absolute right-0 top-full mt-1 py-1 min-w-[140px] rounded-lg bg-popover border border-border shadow-lg z-50"
+                      role="menu"
+                    >
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent rounded-none first:rounded-t-lg last:rounded-b-lg text-left"
+                        onClick={() => {
+                          closeNewMenu();
+                          onAddNote();
+                        }}
+                      >
+                        <FileText className="w-4 h-4 shrink-0" />
+                        新建笔记
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent rounded-none first:rounded-t-lg last:rounded-b-lg text-left"
+                        onClick={() => {
+                          closeNewMenu();
+                          onAddFolder();
+                        }}
+                      >
+                        <Folder className="w-4 h-4 shrink-0" />
+                        新文件夹
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -671,6 +719,52 @@ export function NoteList({
             </div>
           ) : null}
         </DragOverlay>
+
+        {/* 移动端底部 FAB：新建（拇指可及） */}
+        {!showTrash && !isSelectionMode && (
+          <div
+            ref={fabRef}
+            className="fixed bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px)+4rem)] right-4 z-40 sm:hidden flex flex-col items-end gap-2"
+          >
+            {newMenuOpen && newMenuFromFab && (
+              <div
+                className="py-1 min-w-[160px] rounded-xl bg-popover border border-border shadow-xl z-50 mb-2"
+                role="menu"
+              >
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-accent active:bg-accent rounded-t-xl text-left touch-manipulation"
+                  onClick={() => {
+                    closeNewMenu();
+                    onAddNote();
+                  }}
+                >
+                  <FileText className="w-5 h-5 shrink-0" />
+                  新建笔记
+                </button>
+                <button
+                  type="button"
+                  className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-accent active:bg-accent rounded-b-xl text-left touch-manipulation"
+                  onClick={() => {
+                    closeNewMenu();
+                    onAddFolder();
+                  }}
+                >
+                  <Folder className="w-5 h-5 shrink-0" />
+                  新文件夹
+                </button>
+              </div>
+            )}
+            <Button
+              size="icon"
+              variant="default"
+              className="h-14 w-14 rounded-full shadow-lg touch-manipulation"
+              onClick={() => openNewMenu(true)}
+            >
+              <Plus className="w-6 h-6" />
+            </Button>
+          </div>
+        )}
       </div>
     </DndContext>
   );

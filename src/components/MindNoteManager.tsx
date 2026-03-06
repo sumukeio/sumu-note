@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
+import { vibrateSelection } from "@/lib/haptics";
 import {
   getMindNotes,
   deleteMindNote,
@@ -573,9 +574,7 @@ export default function MindNoteManager({
       const newSet = new Set(selectedIds);
       newSet.add(id);
       setSelectedIds(newSet);
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        navigator.vibrate(50);
-      }
+      vibrateSelection();
       ignoreClickRef.current = true;
     }, 500);
   };

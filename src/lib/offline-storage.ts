@@ -10,6 +10,33 @@ localforage.config({
   description: "SumuNote offline storage",
 });
 
+// 缓存实例：用于首屏/离线优先展示（与 pending_sync 分离）
+const cacheStore = localforage.createInstance({
+  name: "SumuNote",
+  storeName: "cache_storage",
+  description: "SumuNote cache storage",
+});
+
+export interface CachedNotesListItem {
+  id: string;
+  folder_id: string | null;
+  title: string | null;
+  content: string | null;
+  updated_at: string | null;
+  tags: string | null;
+  is_pinned?: boolean;
+  is_deleted?: boolean;
+  is_published?: boolean;
+}
+
+export interface CachedNoteContent {
+  id: string;
+  title: string;
+  content: string;
+  tags: string;
+  updated_at: string | null;
+}
+
 export interface PendingSyncNote {
   note_id: string;
   user_id: string;
@@ -86,6 +113,69 @@ export async function getPendingSyncNotes(): Promise<PendingSyncNote[]> {
  */
 export async function removePendingSyncNote(noteId: string): Promise<void> {
   await localforage.removeItem(`note:${noteId}`);
+}
+
+function cachedNotesListKey(userId: string, folderId: string, showTrash: boolean) {
+  return `notes-list:${userId}:${folderId}:${showTrash ? "trash" : "normal"}`;
+}
+function cachedNoteContentKey(userId: string, noteId: string) {
+  return `note-content:${userId}:${noteId}`;
+}
+
+export async function cacheNotesList(params: {
+  userId: string;
+  folderId: string;
+  showTrash: boolean;
+  notes: CachedNotesListItem[];
+}): Promise<void> {
+  const { userId, folderId, showTrash, notes } = params;
+  await cacheStore.setItem(cachedNotesListKey(userId, folderId, showTrash), {
+    cachedAt: Date.now(),
+    notes,
+  });
+}
+
+export async function getCachedNotesList(params: {
+  userId: string;
+  folderId: string;
+  showTrash: boolean;
+}): Promise<CachedNotesListItem[] | null> {
+  const { userId, folderId, showTrash } = params;
+  const data = await cacheStore.getItem<any>(cachedNotesListKey(userId, folderId, showTrash));
+  if (!data || !Array.isArray(data.notes)) return null;
+  return data.notes as CachedNotesListItem[];
+}
+
+export async function cacheNoteContent(params: {
+  userId: string;
+  noteId: string;
+  title: string;
+  content: string;
+  tags: string;
+  updatedAt: string | null;
+}): Promise<void> {
+  const { userId, noteId, title, content, tags, updatedAt } = params;
+  const payload: CachedNoteContent = {
+    id: noteId,
+    title,
+    content,
+    tags,
+    updated_at: updatedAt,
+  };
+  await cacheStore.setItem(cachedNoteContentKey(userId, noteId), {
+    cachedAt: Date.now(),
+    note: payload,
+  });
+}
+
+export async function getCachedNoteContent(params: {
+  userId: string;
+  noteId: string;
+}): Promise<CachedNoteContent | null> {
+  const { userId, noteId } = params;
+  const data = await cacheStore.getItem<any>(cachedNoteContentKey(userId, noteId));
+  if (!data?.note) return null;
+  return data.note as CachedNoteContent;
 }
 
 /**
