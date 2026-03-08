@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getNoteFolderId, searchNotes } from "@/lib/note-service";
+import { getNoteFolderId, getFolderAncestorStack, searchNotes } from "@/lib/note-service";
 import { getRecentNotes, type RecentNoteEntry } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
@@ -13,6 +13,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogOut, Loader2, Download, Search } from "lucide-react";
 import ExportDialog from "@/components/ExportDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 // 高亮关键词的工具函数
@@ -70,11 +78,17 @@ function DashboardPageContent() {
   const processedParamsRef = useRef<string>(""); // 记录已处理的参数组合，防止重复处理
   const [recentNotes, setRecentNotes] = useState<RecentNoteEntry[]>([]);
   const [recentCollapsed, setRecentCollapsed] = useState(true);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   
   // 防抖和请求取消相关
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const searchResultsRef = useRef<HTMLUListElement>(null);
+  // 侧滑返回：始终用最新状态，避免闭包陈旧导致误回根目录；并用于在 touchmove 里阻止浏览器左边缘返回箭头
+  const backStateRef = useRef<{ handleBack: () => void; currentFolder: { id: string; name: string } | null }>({
+    handleBack: () => {},
+    currentFolder: null,
+  });
 
   useEffect(() => {
     const checkUser = async () => {
@@ -179,47 +193,39 @@ function DashboardPageContent() {
       processedParamsRef.current = currentParams; // 标记为已处理
       
       if (folderId) {
-        // 有 folderId，获取文件夹信息
-        supabase
-          .from('folders')
-          .select('id, name')
-          .eq('id', folderId)
-          .eq('user_id', user.id)
-          .single()
-          .then(({ data, error }) => {
-            if (!error && data) {
-              setCurrentFolder({ id: data.id, name: data.name });
-              setInitialNoteId(noteId);
-              // 清除搜索查询，确保显示 NoteManager 而不是搜索结果
-              setSearchQuery("");
-              // 延迟清除 URL 参数，确保状态已更新（增加到 500ms 让状态完全设置）
-              setTimeout(() => {
-                router.replace('/dashboard', { scroll: false });
-              }, 500);
-            } else {
-              processedParamsRef.current = ""; // 失败时重置标志
-            }
-          });
+        // 有 folderId，获取文件夹信息并构建 folderStack（用于侧滑返回上一级）
+        Promise.all([
+          supabase.from('folders').select('id, name').eq('id', folderId).eq('user_id', user.id).single(),
+          getFolderAncestorStack(folderId, user.id),
+        ]).then(([{ data, error }, ancestorStack]) => {
+          if (!error && data) {
+            setFolderStack(ancestorStack);
+            setCurrentFolder({ id: data.id, name: data.name });
+            setInitialNoteId(noteId);
+            setSearchQuery("");
+            setTimeout(() => router.replace('/dashboard', { scroll: false }), 500);
+          } else {
+            processedParamsRef.current = "";
+          }
+        });
       } else {
         // 没有 folderId，先查询笔记的 folder_id
         getNoteFolderId(noteId, user.id).then((folderIdFromNote) => {
           if (folderIdFromNote) {
-            supabase
-              .from('folders')
-              .select('id, name')
-              .eq('id', folderIdFromNote)
-              .eq('user_id', user.id)
-              .single()
-              .then(({ data: folderData, error: folderError }) => {
-                if (!folderError && folderData) {
-                  setCurrentFolder({ id: folderData.id, name: folderData.name });
-                  setInitialNoteId(noteId);
-                  setSearchQuery("");
-                  setTimeout(() => router.replace('/dashboard', { scroll: false }), 500);
-                } else {
-                  processedParamsRef.current = "";
-                }
-              });
+            Promise.all([
+              supabase.from('folders').select('id, name').eq('id', folderIdFromNote).eq('user_id', user.id).single(),
+              getFolderAncestorStack(folderIdFromNote, user.id),
+            ]).then(([{ data: folderData, error: folderError }, ancestorStack]) => {
+              if (!folderError && folderData) {
+                setFolderStack(ancestorStack);
+                setCurrentFolder({ id: folderData.id, name: folderData.name });
+                setInitialNoteId(noteId);
+                setSearchQuery("");
+                setTimeout(() => router.replace('/dashboard', { scroll: false }), 500);
+              } else {
+                processedParamsRef.current = "";
+              }
+            });
           } else {
             console.warn('Note has no folder_id, cannot open directly');
             processedParamsRef.current = "";
@@ -240,9 +246,90 @@ function DashboardPageContent() {
   }, [user?.id, loading, searchParams, router]);
 
   const handleSignOut = async () => {
+    setLogoutConfirmOpen(false);
     await supabase.auth.signOut();
     router.replace("/");
   };
+
+  const handleBack = useCallback(() => {
+    if (folderStack.length > 0) {
+      const previousFolder = folderStack[folderStack.length - 1];
+      setFolderStack((prev) => prev.slice(0, -1));
+      setCurrentFolder(previousFolder);
+      setInitialNoteId(null);
+      return;
+    }
+    if (currentFolder && user?.id) {
+      // folderStack 可能未正确设置（如从其他入口进入），实时获取父级路径
+      getFolderAncestorStack(currentFolder.id, user.id).then((path) => {
+        if (path.length > 0) {
+          const parent = path[path.length - 1];
+          setFolderStack(path.slice(0, -1));
+          setCurrentFolder(parent);
+        } else {
+          setCurrentFolder(null);
+        }
+        setInitialNoteId(null);
+      });
+      return;
+    }
+    setCurrentFolder(null);
+    setInitialNoteId(null);
+  }, [folderStack, currentFolder, user?.id]);
+
+  backStateRef.current = { handleBack, currentFolder };
+
+  // 侧边滑动手势：根目录弹出登出确认，子级返回上一级；左边缘阻止浏览器默认返回箭头
+  useEffect(() => {
+    const edgeThreshold = 36;
+    const swipeThreshold = 50;
+    let startX = 0;
+    let startY = 0;
+    let fromLeftEdge = false;
+    let fromRightEdge = false;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = t.clientY;
+      const w = window.innerWidth;
+      fromLeftEdge = startX < edgeThreshold;
+      fromRightEdge = startX > w - edgeThreshold;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!fromLeftEdge) return;
+      e.preventDefault();
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!fromLeftEdge && !fromRightEdge) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.abs(dx) < swipeThreshold || Math.abs(dx) <= Math.abs(dy)) return;
+      const validSwipe = (fromLeftEdge && dx > 0) || (fromRightEdge && dx < 0);
+      if (!validSwipe) return;
+
+      const { currentFolder: cur, handleBack: back } = backStateRef.current;
+      if (cur) {
+        back();
+      } else {
+        setLogoutConfirmOpen(true);
+      }
+      fromLeftEdge = false;
+      fromRightEdge = false;
+    };
+
+    document.addEventListener("touchstart", handleTouchStart, { passive: true });
+    document.addEventListener("touchmove", handleTouchMove, { passive: false });
+    document.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", handleTouchStart);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, []);
 
   const performSearch = useCallback(async (query: string) => {
     if (!query.trim() || !user?.id) {
@@ -605,18 +692,7 @@ function DashboardPageContent() {
                 userId={user.id} 
                 folderId={currentFolder.id} 
                 folderName={currentFolder.name}
-                onBack={() => {
-                  // 返回上一级文件夹
-                  if (folderStack.length > 0) {
-                    const previousFolder = folderStack[folderStack.length - 1];
-                    setFolderStack(prev => prev.slice(0, -1));
-                    setCurrentFolder(previousFolder);
-                  } else {
-                    // 如果栈为空，返回根目录
-                    setCurrentFolder(null);
-                  }
-                  setInitialNoteId(null);
-                }}
+                onBack={handleBack}
                 onEnterFolder={(id, name) => {
                   // 进入子文件夹时，将当前文件夹推入栈
                   if (currentFolder) {
@@ -639,6 +715,24 @@ function DashboardPageContent() {
         )}
       </main>
       
+      {/* 登出确认对话框 */}
+      <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <DialogContent showCloseButton={true}>
+          <DialogHeader>
+            <DialogTitle>退出登录</DialogTitle>
+            <DialogDescription>确定要退出当前账户吗？</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLogoutConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleSignOut}>
+              退出
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* 导出对话框 */}
       {user?.id && (
         <ExportDialog

@@ -313,6 +313,59 @@ function NoteDetailPageContent() {
     router.back();
   };
 
+  // 侧滑：返回 dashboard 并进入笔记所在文件夹（保持上一级上下文）
+  const handleSwipeBack = useCallback(() => {
+    if (!note) return;
+    const params = new URLSearchParams();
+    params.set("note", note.id);
+    if (note.folder_id) params.set("folder", note.folder_id);
+    router.replace(`/dashboard?${params.toString()}`);
+  }, [note, router]);
+
+  useEffect(() => {
+    const edgeThreshold = 36;
+    const swipeThreshold = 50;
+    let startX = 0;
+    let startY = 0;
+    let fromLeftEdge = false;
+    let fromRightEdge = false;
+
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = t.clientY;
+      const w = window.innerWidth;
+      fromLeftEdge = startX < edgeThreshold;
+      fromRightEdge = startX > w - edgeThreshold;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!fromLeftEdge) return;
+      e.preventDefault();
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!fromLeftEdge && !fromRightEdge) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.abs(dx) < swipeThreshold || Math.abs(dx) <= Math.abs(dy)) return;
+      const validSwipe = (fromLeftEdge && dx > 0) || (fromRightEdge && dx < 0);
+      if (validSwipe) handleSwipeBack();
+      fromLeftEdge = false;
+      fromRightEdge = false;
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [handleSwipeBack]);
+
   const handleEdit = () => {
     if (!note) return;
     // 跳转到 dashboard 并打开笔记编辑模式

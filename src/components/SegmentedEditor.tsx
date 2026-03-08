@@ -1499,15 +1499,15 @@ export default function SegmentedEditor({
                     }
                   }
                 }
-                // 2. 若无 HTML 表格，检测 text/plain 中的制表符分隔内容（Excel 粘贴）
+                // 2. 若无 HTML 表格，检测 text/plain 中的制表符分隔内容（Excel/Sheets 粘贴）
+                // 仅当存在制表符分隔（多列）时才转为表格；纯文本多行不转表格
                 else if (pastedText && processedText === pastedText) {
                   const lines = pastedText.split(/\r?\n/).filter((l) => l.trim());
                   if (lines.length >= 1) {
                     const rows = lines.map((l) => l.split('\t').map((c) => c.trim()));
                     const colCount = Math.max(...rows.map((r) => r.length));
-                    const hasMultipleCols = colCount >= 2 || rows.some((r) => r.length >= 2);
-                    const hasMultipleRows = rows.length >= 2;
-                    if (hasMultipleCols || hasMultipleRows) {
+                    const hasTabSeparators = colCount >= 2;
+                    if (hasTabSeparators) {
                       const normalized = rows.map((r) => {
                         const row = [...r];
                         while (row.length < colCount) row.push('');

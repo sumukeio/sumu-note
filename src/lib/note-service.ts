@@ -210,6 +210,38 @@ export async function getNoteByIdOrTitle(
 }
 
 /**
+ * 获取文件夹的祖先路径（从根到父级），用于构建 folderStack
+ * 例如：根->A->B，folderId=B 时返回 [{id:A.id, name:A.name}]
+ */
+export async function getFolderAncestorStack(
+  folderId: string,
+  userId: string
+): Promise<Array<{ id: string; name: string }>> {
+  const stack: Array<{ id: string; name: string }> = [];
+  let currentId: string | null = folderId;
+  while (currentId) {
+    const { data } = await supabase
+      .from("folders")
+      .select("id, name, parent_id")
+      .eq("id", currentId)
+      .eq("user_id", userId)
+      .single();
+    if (!data || !(data as { parent_id?: string | null }).parent_id) break;
+    const parentId = (data as { parent_id: string }).parent_id;
+    const { data: parent } = await supabase
+      .from("folders")
+      .select("id, name")
+      .eq("id", parentId)
+      .eq("user_id", userId)
+      .single();
+    if (!parent) break;
+    stack.unshift({ id: (parent as { id: string }).id, name: (parent as { name: string }).name ?? "" });
+    currentId = parentId;
+  }
+  return stack;
+}
+
+/**
  * 获取笔记的 folder_id（用于 dashboard 根据 noteId 解析文件夹）
  */
 export async function getNoteFolderId(
