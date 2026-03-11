@@ -531,30 +531,6 @@ export default function SegmentedEditor({
     []
   );
 
-  /** 应用待定的粘贴（表格或纯文本）；由弹窗按钮传入当前 pending 避免闭包陈旧 */
-  const applyPendingPaste = useCallback(
-    (asTable: boolean, pending: typeof pendingPaste) => {
-      setPendingPaste(null);
-      setPasteConfirmOpen(false);
-      if (!pending) return;
-      const textarea = textareaRefs.current.get(pending.segmentIndex);
-      if (!textarea) return;
-      const currentValue = textarea.value;
-      const start = Math.min(pending.start, currentValue.length);
-      const end = Math.min(Math.max(start, pending.end), currentValue.length);
-      const insert = asTable ? pending.pasteAsTable : pending.pasteAsPlain;
-      const newValue = currentValue.substring(0, start) + insert + currentValue.substring(end);
-      updateTextSegment(pending.segmentIndex, newValue, textarea);
-      autoResizeTextarea(textarea);
-      setTimeout(() => {
-        const newCursorPos = start + insert.length;
-        textarea.setSelectionRange(newCursorPos, newCursorPos);
-        textarea.focus();
-      }, 0);
-    },
-    [updateTextSegment, autoResizeTextarea]
-  );
-
   // 恢复光标位置和滚动位置（仅移动端：键盘弹出/收起后恢复；PC 端不执行，避免抖动）
   const restoreCursorPosition = useCallback(() => {
     // 移动端浏览器对键盘/可视区域的滚动有自己的策略。
@@ -735,6 +711,30 @@ export default function SegmentedEditor({
       }, 300);
     },
     [segmentsToMarkdown, restoreCursorPosition, scheduleFlushPendingUpdate]
+  );
+
+  /** 应用待定的粘贴（表格或纯文本）；由弹窗按钮传入当前 pending 避免闭包陈旧 */
+  const applyPendingPaste = useCallback(
+    (asTable: boolean, pending: typeof pendingPaste) => {
+      setPendingPaste(null);
+      setPasteConfirmOpen(false);
+      if (!pending) return;
+      const textarea = textareaRefs.current.get(pending.segmentIndex);
+      if (!textarea) return;
+      const currentValue = textarea.value;
+      const start = Math.min(pending.start, currentValue.length);
+      const end = Math.min(Math.max(start, pending.end), currentValue.length);
+      const insert = asTable ? pending.pasteAsTable : pending.pasteAsPlain;
+      const newValue = currentValue.substring(0, start) + insert + currentValue.substring(end);
+      updateTextSegment(pending.segmentIndex, newValue, textarea);
+      autoResizeTextarea(textarea);
+      setTimeout(() => {
+        const newCursorPos = start + insert.length;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        textarea.focus();
+      }, 0);
+    },
+    [updateTextSegment, autoResizeTextarea]
   );
 
   // 格式化文本

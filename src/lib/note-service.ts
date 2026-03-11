@@ -220,20 +220,20 @@ export async function getFolderAncestorStack(
   const stack: Array<{ id: string; name: string }> = [];
   let currentId: string | null = folderId;
   while (currentId) {
-    const { data } = await supabase
+    const { data: folderRow } = (await supabase
       .from("folders")
       .select("id, name, parent_id")
       .eq("id", currentId)
       .eq("user_id", userId)
-      .single();
-    if (!data || !(data as { parent_id?: string | null }).parent_id) break;
-    const parentId = (data as { parent_id: string }).parent_id;
-    const { data: parent } = await supabase
+      .single()) as { data: { id: string; name: string | null; parent_id: string | null } | null };
+    if (!folderRow || !folderRow.parent_id) break;
+    const parentId: string = folderRow.parent_id;
+    const { data: parent } = (await supabase
       .from("folders")
       .select("id, name")
       .eq("id", parentId)
       .eq("user_id", userId)
-      .single();
+      .single()) as { data: { id: string; name: string | null } | null };
     if (!parent) break;
     stack.unshift({ id: (parent as { id: string }).id, name: (parent as { name: string }).name ?? "" });
     currentId = parentId;
