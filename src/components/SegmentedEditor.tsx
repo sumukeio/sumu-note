@@ -69,6 +69,16 @@ export default function SegmentedEditor({
   const flushScheduledRef = useRef(false);
   const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
   const [pendingLinkToken, setPendingLinkToken] = useState<string | null>(null);
+
+  // 粘贴表格确认：命中「表格判定规则」时弹窗，由用户选择是否以表格形式粘贴
+  const [pasteConfirmOpen, setPasteConfirmOpen] = useState(false);
+  const [pendingPaste, setPendingPaste] = useState<{
+    segmentIndex: number;
+    start: number;
+    end: number;
+    pasteAsTable: string;
+    pasteAsPlain: string;
+  } | null>(null);
   
   // 保存光标位置和滚动位置，用于移动端编辑后恢复
   const savedCursorStateRef = useRef<{
@@ -470,6 +480,80 @@ export default function SegmentedEditor({
     };
     return walk(tmp).replace(/\n{3,}/g, '\n\n').trim();
   }, []);
+
+  /**
+   * 粘贴内容「表格判定规则」：仅当以下任一成立时视为可转为表格，并提示用户选择。
+   * - Rule A：剪贴板含 text/html 且包含 <table>...</table>（网页/Word/Excel 复制）。
+   * - Rule B：剪贴板为 text/plain，且（1）至少 2 行（2）存在制表符分隔（3）最大列数 ≥ 2（Excel/记事本多列粘贴）。
+   * 返回是否命中规则，以及「表格形式」与「纯文本形式」的字符串，供弹窗选择后插入。
+   */
+  const detectPasteAsTable = useCallback(
+    (pastedText: string, htmlData: string): { tableDetected: boolean; pasteAsTable: string; pasteAsPlain: string } => {
+      const pasteAsPlain = pastedText ?? "";
+      let pasteAsTable = "";
+
+      // Rule A：HTML 表格
+      if (htmlData && /<table[\s\S]*?<\/table>/i.test(htmlData)) {
+        const tableMatch = htmlData.match(/<table[\s\S]*?<\/table>/i);
+        if (tableMatch) {
+          const md = htmlTableToMarkdown(tableMatch[0]);
+          if (md.trim()) {
+            pasteAsTable = md.replace(/\n{3,}/g, "\n\n").trim();
+            return { tableDetected: true, pasteAsTable, pasteAsPlain };
+          }
+        }
+      }
+
+      // Rule B：制表符分隔多列（至少 2 行、有 \t、列数 ≥ 2）
+      if (pastedText && pasteAsPlain === pastedText) {
+        const lines = pastedText.split(/\r?\n/).filter((l) => l.trim());
+        if (lines.length >= 2) {
+          const rows = lines.map((l) => l.split("\t").map((c) => c.trim()));
+          const colCount = Math.max(...rows.map((r) => r.length));
+          const hasTabSeparators = rows.some((r) => r.length > 1) && colCount >= 2;
+          if (hasTabSeparators) {
+            const normalized = rows.map((r) => {
+              const row = [...r];
+              while (row.length < colCount) row.push("");
+              return row;
+            });
+            const md = tableDataToMarkdown(normalized);
+            if (md.trim()) {
+              pasteAsTable = md.replace(/\n{3,}/g, "\n\n").trim();
+              return { tableDetected: true, pasteAsTable, pasteAsPlain };
+            }
+          }
+        }
+      }
+
+      return { tableDetected: false, pasteAsTable: "", pasteAsPlain };
+    },
+    []
+  );
+
+  /** 应用待定的粘贴（表格或纯文本）；由弹窗按钮传入当前 pending 避免闭包陈旧 */
+  const applyPendingPaste = useCallback(
+    (asTable: boolean, pending: typeof pendingPaste) => {
+      setPendingPaste(null);
+      setPasteConfirmOpen(false);
+      if (!pending) return;
+      const textarea = textareaRefs.current.get(pending.segmentIndex);
+      if (!textarea) return;
+      const currentValue = textarea.value;
+      const start = Math.min(pending.start, currentValue.length);
+      const end = Math.min(Math.max(start, pending.end), currentValue.length);
+      const insert = asTable ? pending.pasteAsTable : pending.pasteAsPlain;
+      const newValue = currentValue.substring(0, start) + insert + currentValue.substring(end);
+      updateTextSegment(pending.segmentIndex, newValue, textarea);
+      autoResizeTextarea(textarea);
+      setTimeout(() => {
+        const newCursorPos = start + insert.length;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        textarea.focus();
+      }, 0);
+    },
+    [updateTextSegment, autoResizeTextarea]
+  );
 
   // 恢复光标位置和滚动位置（仅移动端：键盘弹出/收起后恢复；PC 端不执行，避免抖动）
   const restoreCursorPosition = useCallback(() => {
@@ -1478,59 +1562,39 @@ export default function SegmentedEditor({
                 }
               }}
               onPaste={(e) => {
-                // 粘贴优化：表格、富文本转换（图片相关不做）
                 e.preventDefault();
-                const pastedText = e.clipboardData.getData('text/plain');
-                const htmlData = e.clipboardData.getData('text/html');
+                const pastedText = e.clipboardData.getData("text/plain");
+                const htmlData = e.clipboardData.getData("text/html");
                 const textarea = e.currentTarget;
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
                 const currentValue = textarea.value;
 
-                let processedText = pastedText;
+                const { tableDetected, pasteAsTable, pasteAsPlain } = detectPasteAsTable(pastedText, htmlData);
 
-                // 1. 优先检测 HTML 中的 <table>，转为 Markdown 表格
-                if (htmlData && /<table[\s\S]*?<\/table>/i.test(htmlData)) {
-                  const tableMatch = htmlData.match(/<table[\s\S]*?<\/table>/i);
-                  if (tableMatch) {
-                    const md = htmlTableToMarkdown(tableMatch[0]);
-                    if (md.trim()) {
-                      processedText = md;
-                    }
-                  }
+                if (tableDetected && pasteAsTable) {
+                  setPendingPaste({
+                    segmentIndex,
+                    start,
+                    end,
+                    pasteAsTable,
+                    pasteAsPlain: pasteAsPlain ?? pastedText,
+                  });
+                  setPasteConfirmOpen(true);
+                  return;
                 }
-                // 2. 若无 HTML 表格，检测 text/plain 中的制表符分隔内容（Excel/Sheets 粘贴）
-                // 仅当存在制表符分隔（多列）时才转为表格；纯文本多行不转表格
-                else if (pastedText && processedText === pastedText) {
-                  const lines = pastedText.split(/\r?\n/).filter((l) => l.trim());
-                  if (lines.length >= 1) {
-                    const rows = lines.map((l) => l.split('\t').map((c) => c.trim()));
-                    const colCount = Math.max(...rows.map((r) => r.length));
-                    const hasTabSeparators = colCount >= 2;
-                    if (hasTabSeparators) {
-                      const normalized = rows.map((r) => {
-                        const row = [...r];
-                        while (row.length < colCount) row.push('');
-                        return row;
-                      });
-                      const md = tableDataToMarkdown(normalized);
-                      if (md.trim()) processedText = md;
-                    }
-                  }
-                }
-                // 3. 若有 HTML 但无表格，做富文本优化
-                else if (htmlData && processedText === pastedText) {
+
+                // 未命中表格规则：直接粘贴（富文本转 Markdown 或纯文本）
+                let processedText = pastedText ?? "";
+                if (htmlData && processedText === pastedText) {
                   processedText = htmlToMarkdown(htmlData);
-                  if (!processedText.trim()) processedText = pastedText;
+                  if (!processedText.trim()) processedText = pastedText ?? "";
                 }
-
-                // 清理多余空白行
-                processedText = processedText.replace(/\n{3,}/g, '\n\n').trim();
+                processedText = processedText.replace(/\n{3,}/g, "\n\n").trim();
 
                 const newValue = currentValue.substring(0, start) + processedText + currentValue.substring(end);
                 updateTextSegment(segmentIndex, newValue, textarea);
                 autoResizeTextarea(textarea);
-
                 setTimeout(() => {
                   const newCursorPos = start + processedText.length;
                   textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -1640,6 +1704,38 @@ export default function SegmentedEditor({
               }}
             >
               打开
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 粘贴表格确认：检测到可转为表格时询问用户 */}
+      <Dialog
+        open={pasteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPasteConfirmOpen(false);
+            setPendingPaste(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>粘贴方式</DialogTitle>
+            <DialogDescription>
+              检测到表格内容，是否以表格形式粘贴？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4 gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => applyPendingPaste(false, pendingPaste)}
+            >
+              否，按纯文本粘贴
+            </Button>
+            <Button type="button" onClick={() => applyPendingPaste(true, pendingPaste)}>
+              是，以表格粘贴
             </Button>
           </DialogFooter>
         </DialogContent>
