@@ -977,7 +977,7 @@ export function NoteEditor(props: NoteEditorProps) {
           )}
         </div>
       </div>
-      {/* 移动端底部工具栏 */}
+      {/* 移动端：编辑态悬浮「完成」按钮 */}
       {isMobileWritingMode ? (
         <button
           onClick={() => {
@@ -1002,94 +1002,102 @@ export function NoteEditor(props: NoteEditorProps) {
           ) : (
             <Pencil className="w-4 h-4" />
           )}
-          <span>{saveStatus === "unsaved" ? "完成并保存" : "完成"}</span>
+          <span>完成</span>
         </button>
       ) : (
-        <div
-          className="fixed bottom-0 left-0 right-0 sm:hidden z-50 bg-background/95 backdrop-blur-md border-t border-border shadow-lg safe-area-inset-bottom"
-          style={{ bottom: "calc(0px + var(--vv-bottom-inset, 0px))" }}
-        >
+        // 移动端底部工具栏：仅在预览态存在，编辑态隐藏
+        isMobile && previewMode && (
           <div
-            className="flex items-center justify-around px-2 py-2 gap-1"
-            style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
+            className="fixed bottom-0 left-0 right-0 sm:hidden z-50 bg-background/95 backdrop-blur-md border-t border-border shadow-lg safe-area-inset-bottom"
+            style={{ bottom: "calc(0px + var(--vv-bottom-inset, 0px))" }}
           >
-            <button
-              onClick={() => {
-                if (saveStatus === "unsaved") {
-                  saveNote(title, content, isPinned, isPublished, tags);
-                }
-              }}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation min-w-[44px] min-h-[44px]",
-                saveStatus === "unsaved" ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
-              )}
-              title="保存"
+            <div
+              className="flex items-center justify-around px-2 py-2 gap-1"
+              style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
             >
-              {saveStatus === "saving" ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : saveStatus === "saved" ? (
-                <CheckCircle2 className="w-5 h-5" />
-              ) : (
-                <Pencil className="w-5 h-5" />
+              {/* 状态展示（不再强调“保存”按钮） */}
+              <div
+                className={cn(
+                  "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg min-w-[44px] min-h-[44px]",
+                  "bg-accent/50 text-accent-foreground"
+                )}
+              >
+                {saveStatus === "saving" ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : saveStatus === "error" ? (
+                  <X className="w-5 h-5" />
+                ) : saveStatus === "unsaved" ? (
+                  <Pencil className="w-5 h-5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5" />
+                )}
+                <span className="text-[10px] font-medium">
+                  {saveStatus === "saving"
+                    ? "保存中"
+                    : saveStatus === "error"
+                    ? "保存失败"
+                    : saveStatus === "unsaved"
+                    ? "有改动"
+                    : "已保存"}
+                </span>
+              </div>
+              {!zenMode && (
+                <button
+                  onClick={() => setPreviewMode(!previewMode)}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation min-w-[44px] min-h-[44px]",
+                    previewMode ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                  )}
+                  title={previewMode ? "编辑" : "预览"}
+                >
+                  {previewMode ? (
+                    <PenLine className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
+                  <span className="text-[10px] font-medium">{previewMode ? "编辑" : "预览"}</span>
+                </button>
               )}
-              <span className="text-[10px] font-medium">保存</span>
-            </button>
-            {!zenMode && (
               <button
-                onClick={() => setPreviewMode(!previewMode)}
+                onClick={() => setZenMode(!zenMode)}
                 className={cn(
                   "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation min-w-[44px] min-h-[44px]",
-                  previewMode ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                  zenMode ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
                 )}
-                title={previewMode ? "编辑" : "预览"}
+                title={zenMode ? "退出专注" : "专注模式"}
               >
-                {previewMode ? (
-                  <PenLine className="w-5 h-5" />
+                {zenMode ? (
+                  <Minimize2 className="w-5 h-5" />
                 ) : (
-                  <Eye className="w-5 h-5" />
+                  <Maximize2 className="w-5 h-5" />
                 )}
-                <span className="text-[10px] font-medium">{previewMode ? "编辑" : "预览"}</span>
+                <span className="text-[10px] font-medium">专注</span>
               </button>
-            )}
-            <button
-              onClick={() => setZenMode(!zenMode)}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation min-w-[44px] min-h-[44px]",
-                zenMode ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
-              )}
-              title={zenMode ? "退出专注" : "专注模式"}
-            >
-              {zenMode ? (
-                <Minimize2 className="w-5 h-5" />
-              ) : (
-                <Maximize2 className="w-5 h-5" />
-              )}
-              <span className="text-[10px] font-medium">专注</span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                if (moreButtonRef.current) {
-                  const rect = moreButtonRef.current.getBoundingClientRect();
-                  setMenuPosition({
-                    top: rect.top - 200,
-                    right: window.innerWidth - rect.right,
-                  });
-                }
-                setMoreMenuOpen((prev) => !prev);
-              }}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation min-w-[44px] min-h-[44px]",
-                moreMenuOpen ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
-              )}
-              title="更多"
-            >
-              <MoreVertical className="w-5 h-5" />
-              <span className="text-[10px] font-medium">更多</span>
-            </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (moreButtonRef.current) {
+                    const rect = moreButtonRef.current.getBoundingClientRect();
+                    setMenuPosition({
+                      top: rect.top - 200,
+                      right: window.innerWidth - rect.right,
+                    });
+                  }
+                  setMoreMenuOpen((prev) => !prev);
+                }}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all touch-manipulation min-w-[44px] min-h-[44px]",
+                  moreMenuOpen ? "bg-primary text-primary-foreground" : "bg-accent/50 text-accent-foreground"
+                )}
+                title="更多"
+              >
+                <MoreVertical className="w-5 h-5" />
+                <span className="text-[10px] font-medium">更多</span>
+              </button>
+            </div>
           </div>
-        </div>
+        )
       )}
       {/* Task 7.5.3：目录弹层，点击项滚动到对应标题并关闭 */}
       {tocOpen && outline.length > 0 && typeof document !== "undefined" && createPortal(

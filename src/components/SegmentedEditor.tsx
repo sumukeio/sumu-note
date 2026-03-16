@@ -17,7 +17,6 @@ import { detectTableAtCursor, tableDataToMarkdown, htmlTableToMarkdown } from "@
 import { getNoteTableLayout, upsertNoteTableLayout } from "@/lib/note-service";
 import { cn } from "@/lib/utils";
 import FloatingToolbar from "@/components/FloatingToolbar";
-import MobileEditorToolbar, { type InsertBlockType } from "@/components/MobileEditorToolbar";
 
 interface SegmentedEditorProps {
   content: string;
@@ -665,6 +664,11 @@ export default function SegmentedEditor({
   // 更新文本段
   const updateTextSegment = useCallback(
     (index: number, newContent: string, textarea: HTMLTextAreaElement) => {
+      // 仅在移动端写作模式下，尝试保护外层滚动位置，避免剪切/粘贴后回到顶部
+      const scrollContainer = scrollContainerRef?.current ?? null;
+      const prevScrollTop =
+        isMobileWritingMode && scrollContainer ? scrollContainer.scrollTop : null;
+
       // 标记正在输入
       isTypingRef.current = true;
       lastInputTimeRef.current = Date.now();
@@ -694,6 +698,19 @@ export default function SegmentedEditor({
         return newSegments;
       });
       scheduleFlushPendingUpdate();
+
+      // 在 DOM 更新后恢复滚动位置，仅针对移动端写作模式
+      if (prevScrollTop !== null && scrollContainer) {
+        requestAnimationFrame(() => {
+          // 再加一层 setTimeout，确保虚拟列表等高度计算完成
+          setTimeout(() => {
+            // 只在当前仍处于写作模式时恢复，避免干扰 PC 端或模式切换
+            if (isMobileWritingMode && scrollContainer) {
+              scrollContainer.scrollTop = prevScrollTop;
+            }
+          }, 0);
+        });
+      }
       
       // 在输入停止后（300ms 无输入）标记为非输入状态，并恢复光标
       // 组合态（中文输入法）期间不执行，避免打断输入
@@ -821,57 +838,6 @@ export default function SegmentedEditor({
     setSelectedText("");
     setToolbarPosition(null);
   }, [updateTextSegment]);
-
-  // 在光标处插入块（移动端工具栏「插入」用）
-  const insertBlockAtCursor = useCallback(
-    (segmentIndex: number, blockType: InsertBlockType) => {
-      const textarea = textareaRefs.current.get(segmentIndex);
-      if (!textarea) return;
-      const pos = textarea.selectionStart;
-      const value = textarea.value;
-      let insert = "";
-      let newCursorOffset = 0;
-      switch (blockType) {
-        case "heading":
-          insert = "\n## ";
-          newCursorOffset = insert.length;
-          break;
-        case "list":
-          insert = "\n- ";
-          newCursorOffset = insert.length;
-          break;
-        case "todo":
-          insert = "\n- [ ] ";
-          newCursorOffset = insert.length;
-          break;
-        case "quote":
-          insert = "\n> ";
-          newCursorOffset = insert.length;
-          break;
-        case "code":
-          insert = "\n```\n\n```";
-          newCursorOffset = pos + 5; // 光标在中间空行
-          break;
-        case "link":
-          insert = "[链接](https://example.com)";
-          newCursorOffset = pos + 2; // 选中「链接」
-          break;
-        case "image":
-          // 由 onRequestInsertImage 处理
-          return;
-        default:
-          return;
-      }
-      const newValue = value.substring(0, pos) + insert + value.substring(pos);
-      updateTextSegment(segmentIndex, newValue, textarea);
-      setTimeout(() => {
-        const cursor = Math.min(newCursorOffset, newValue.length);
-        textarea.setSelectionRange(cursor, blockType === "link" ? cursor + 2 : cursor);
-        textarea.focus();
-      }, 0);
-    },
-    [updateTextSegment]
-  );
 
   // 更新表格段
   const updateTableSegment = useCallback(
@@ -1637,7 +1603,7 @@ export default function SegmentedEditor({
         })}
       </div>
 
-      {/* 浮动工具栏（移动端写作模式下由键盘上方工具栏替代，不重复显示） */}
+      {/* 浮动工具栏 */}
       {!isMobileWritingMode && (
         <FloatingToolbar
           selectedText={selectedText}
@@ -1655,24 +1621,6 @@ export default function SegmentedEditor({
           }}
         />
       )}
-
-      {/* 移动端键盘上方常驻编辑工具栏（Task 7.3.x） */}
-      <MobileEditorToolbar
-        visible={isMobileWritingMode}
-        hasSelection={!!selectedText.trim()}
-        onFormat={(type) => {
-          if (activeTextareaIndexRef.current !== null) {
-            formatText(activeTextareaIndexRef.current, type);
-          }
-        }}
-        onInsertBlock={(type) => {
-          const idx = activeTextareaIndexRef.current ?? 0;
-          if (segments[idx]?.type === "text") {
-            insertBlockAtCursor(idx, type);
-          }
-        }}
-        onInsertImage={onRequestInsertImage}
-      />
 
       {/* 应用内部的链接跳转确认弹窗 */}
       <Dialog open={linkConfirmOpen} onOpenChange={setLinkConfirmOpen}>
