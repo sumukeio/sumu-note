@@ -720,8 +720,9 @@ export function NoteEditor(props: NoteEditorProps) {
           )}
           style={
             {
-              scrollPaddingBottom:
-                "calc(120px + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))",
+              scrollPaddingBottom: isMobile && !previewMode
+                ? "calc(72px + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))"
+                : "calc(120px + env(safe-area-inset-bottom, 0px) + var(--vv-bottom-inset, 0px))",
               WebkitOverflowScrolling: "touch",
             } as React.CSSProperties
           }

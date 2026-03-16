@@ -661,14 +661,9 @@ export default function SegmentedEditor({
     }
   }, [segments.length, restoreCursorPosition]);
 
-  // 更新文本段
+  // 更新文本段（普通输入场景尽量不强行干预滚动，避免抖动）
   const updateTextSegment = useCallback(
     (index: number, newContent: string, textarea: HTMLTextAreaElement) => {
-      // 仅在移动端写作模式下，尝试保护外层滚动位置，避免剪切/粘贴后回到顶部
-      const scrollContainer = scrollContainerRef?.current ?? null;
-      const prevScrollTop =
-        isMobileWritingMode && scrollContainer ? scrollContainer.scrollTop : null;
-
       // 标记正在输入
       isTypingRef.current = true;
       lastInputTimeRef.current = Date.now();
@@ -698,19 +693,6 @@ export default function SegmentedEditor({
         return newSegments;
       });
       scheduleFlushPendingUpdate();
-
-      // 在 DOM 更新后恢复滚动位置，仅针对移动端写作模式
-      if (prevScrollTop !== null && scrollContainer) {
-        requestAnimationFrame(() => {
-          // 再加一层 setTimeout，确保虚拟列表等高度计算完成
-          setTimeout(() => {
-            // 只在当前仍处于写作模式时恢复，避免干扰 PC 端或模式切换
-            if (isMobileWritingMode && scrollContainer) {
-              scrollContainer.scrollTop = prevScrollTop;
-            }
-          }, 0);
-        });
-      }
       
       // 在输入停止后（300ms 无输入）标记为非输入状态，并恢复光标
       // 组合态（中文输入法）期间不执行，避免打断输入
@@ -1532,6 +1514,9 @@ export default function SegmentedEditor({
                 const pastedText = e.clipboardData.getData("text/plain");
                 const htmlData = e.clipboardData.getData("text/html");
                 const textarea = e.currentTarget;
+                const scrollContainer = scrollContainerRef?.current ?? null;
+                const prevScrollTop =
+                  isMobileWritingMode && scrollContainer ? scrollContainer.scrollTop : null;
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
                 const currentValue = textarea.value;
@@ -1565,6 +1550,11 @@ export default function SegmentedEditor({
                   const newCursorPos = start + processedText.length;
                   textarea.setSelectionRange(newCursorPos, newCursorPos);
                   textarea.focus();
+
+                  // 大段粘贴后，仅在移动端写作模式下尝试恢复外层滚动位置，防止跳到顶部
+                  if (prevScrollTop !== null && scrollContainer) {
+                    scrollContainer.scrollTop = prevScrollTop;
+                  }
                 }, 0);
               }}
               onFocus={(e) => {
