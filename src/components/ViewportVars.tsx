@@ -52,11 +52,23 @@ export default function ViewportVars() {
     vv?.addEventListener("resize", update);
     vv?.addEventListener("scroll", update);
     window.addEventListener("resize", update);
+    // 某些移动端浏览器在路由切换/返回前台时不会触发 vv resize/scroll，
+    // 导致 --vvh/--vv-offset-top 卡住（表现为全屏层只显示 1/3 或位置错乱）。
+    window.addEventListener("pageshow", update);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+
+    // 兜底：下一帧与短延迟各刷新一次，覆盖“首帧 vv 值不准”的情况
+    requestAnimationFrame(update);
+    setTimeout(update, 120);
 
     return () => {
       vv?.removeEventListener("resize", update);
       vv?.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
+      window.removeEventListener("pageshow", update);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
     };
   }, []);
 

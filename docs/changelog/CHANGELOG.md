@@ -4,6 +4,38 @@
 
 ## 2026-03-XX（最新）
 
+### 🧩 Dock 多选与编辑体验修复（2026-03-18）
+
+#### 1) 粘贴 Markdown 不再“缩成一团” ✅
+- **问题**：编辑器粘贴时优先走 `text/html` → `htmlToMarkdown()`，其中对空白的处理会吞掉换行，导致 Markdown 段落合并成一行。
+- **修复**：
+  - 粘贴策略：检测到多行或疑似 Markdown 时优先使用 `text/plain`，保留换行与段落。
+  - `htmlToMarkdown`：不再用 `\\s+` 全量折叠空白；保留换行，并对 `pre/code` 做更安全的转换。
+- **文件**：`src/components/SegmentedEditor.tsx`
+
+#### 2) Dock 新增「全选/取消全选」 ✅
+- **能力**：在文件夹列表页 Dock 中新增「全选」，支持一键选中当前列表内可见的**文件夹 + 笔记**；再次点击可「取消全选」并退出多选模式。
+- **文件**：`src/components/NoteList.tsx`、`src/components/NoteManager.tsx`
+
+#### 3) 多选模式下点击空白区域可取消选中 ✅
+- **问题**：部分页面只能点击“卡片间隙/局部空白”才能退出多选，点击页面其它留白不生效。
+- **修复**：在列表页与根目录文件夹页增加 document 捕获级空白点击退出（排除卡片、Dock、顶部栏）。
+- **文件**：`src/components/NoteList.tsx`、`src/components/FolderManager.tsx`
+
+#### 4) 移动端编辑页「完成」按钮去重 ✅
+- **问题**：移动端写作模式右上与右下均出现「完成」，造成重复入口。
+- **修复**：移除右上角「完成」，仅保留底部悬浮「完成」。
+- **文件**：`src/components/NoteEditor.tsx`
+
+#### 5) 移动端：进入编辑页只显示 1/3 / 键盘遮挡输入 ✅
+- **问题 A**：从预览页进入编辑页，编辑层偶发只显示 1/3，高度/位移依赖的 `--vvh/--vv-offset-top` 可能卡在旧值。
+- **问题 B**：编辑时当前输入位置可能被软键盘覆盖。
+- **修复**：
+  - `ViewportVars` 增加 `pageshow/focus/visibilitychange` 等时机强制刷新 `visualViewport` 相关 CSS 变量，并做首帧兜底刷新。
+  - 编辑全屏层对 `--vv-offset-top` 做保护：仅允许负 offset 生效，避免异常正 offset 把全屏层下推。
+  - 移动端写作模式下 textarea 聚焦时 `scrollIntoView`，降低被键盘遮挡概率。
+- **文件**：`src/components/ViewportVars.tsx`、`src/components/NoteEditor.tsx`、`src/components/SegmentedEditor.tsx`
+
 ### ✨ 11 项需求落地（1-11）与体验补齐（2026-03-06）
 
 #### 1) 撤销/重做快捷键 ✅

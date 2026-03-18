@@ -269,7 +269,9 @@ export function NoteEditor(props: NoteEditorProps) {
         )}
         style={{
           height: "var(--vvh, 100dvh)",
-          transform: "translateY(var(--vv-offset-top, 0px))",
+          // 避免部分移动端浏览器 offsetTop 卡住为大正值导致“只剩 1/3 可见”
+          // 对全屏 fixed 覆盖层来说，仅需要处理负 offset（极少见），正 offset 统一按 0 处理
+          transform: "translateY(min(var(--vv-offset-top, 0px), 0px))",
         }}
       >
         <header
@@ -329,29 +331,8 @@ export function NoteEditor(props: NoteEditorProps) {
               {/* 右：写作模式时显示完成，否则显示更多 */}
               <div className="flex items-center justify-end shrink-0">
                 {isMobileWritingMode ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (saveStatus === "unsaved") {
-                        saveNote(title, content, isPinned, isPublished, tags);
-                      }
-                      onExitMobileWritingMode?.();
-                      if (isMobile) setIsMobileReadingMode(true);
-                    }}
-                    className={cn(
-                      "min-w-[44px] min-h-[44px] px-3 rounded-full text-sm font-medium touch-manipulation flex items-center justify-center gap-1.5",
-                      saveStatus === "unsaved"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-accent/80 text-accent-foreground"
-                    )}
-                  >
-                    {saveStatus === "saving" ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="w-4 h-4" />
-                    )}
-                    <span>完成</span>
-                  </button>
+                  // 需求：移动端编辑界面仅保留底部“完成”，取消右上角“完成”
+                  <div className="min-w-[44px] min-h-[44px]" />
                 ) : (
                   <div ref={moreMenuRef}>
                     <button

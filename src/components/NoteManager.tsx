@@ -2011,6 +2011,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         exitSelectionMode={exitSelectionMode}
+        onSelectAll={(ids) => {
+          setSelectedIds(new Set(ids));
+          vibrateSelection();
+        }}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onRestore={handleRestore}

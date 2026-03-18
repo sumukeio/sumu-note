@@ -41,6 +41,34 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const ignoreClickRef = useRef(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // 需求：根目录（FolderManager）选中后，点击任意空白处也能取消选中（不仅限于卡片间隙）
+  useEffect(() => {
+    if (!isSelectionMode) return;
+
+    const shouldIgnore = (target: HTMLElement | null) => {
+      if (!target) return true;
+      return !!(
+        target.closest("[data-root-folder-card]") ||
+        target.closest("[data-root-folder-header]") ||
+        target.closest("[data-selection-dock]")
+      );
+    };
+
+    const onPointerDown = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (shouldIgnore(target)) return;
+      exitSelectionMode();
+    };
+
+    document.addEventListener("mousedown", onPointerDown, true);
+    document.addEventListener("touchstart", onPointerDown, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown, true);
+      document.removeEventListener("touchstart", onPointerDown, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSelectionMode]);
   
   // 拖拽传感器配置
   const sensors = useSensors(
@@ -350,7 +378,10 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="pb-32">
-        <header className="flex items-center justify-between mb-6 py-4">
+        <header
+          data-root-folder-header
+          className="flex items-center justify-between mb-6 py-4"
+        >
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate flex-1 min-w-0">
             <span className="truncate">我的文件夹</span>
             <span className="text-xs font-normal text-muted-foreground bg-accent px-2 py-1 rounded-full shrink-0 hidden sm:inline">{folders.length}</span>
@@ -438,7 +469,14 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
         </div>
       </div>
 
-      <div className={cn("fixed left-0 right-0 flex justify-center z-50 transition-all duration-300", "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]", isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none")}>
+      <div
+        data-selection-dock
+        className={cn(
+          "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300",
+          "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]",
+          isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none"
+        )}
+      >
         <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
             <button onClick={(e) => { e.stopPropagation(); exitSelectionMode(); }} className="absolute -top-3 -right-3 w-6 h-6 bg-muted rounded-full flex items-center justify-center border border-border shadow-md"><X className="w-3 h-3" /></button>
             

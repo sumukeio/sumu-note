@@ -7,6 +7,7 @@ import {
   FolderInput,
   X,
   Check,
+  CheckSquare,
   Plus,
   FileText,
   ArrowLeft,
@@ -268,6 +269,7 @@ export interface NoteListProps {
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseUp: () => void;
   exitSelectionMode: () => void;
+  onSelectAll: (ids: string[]) => void;
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
   onRestore: () => void;
@@ -305,6 +307,7 @@ export function NoteList({
   onMouseMove,
   onMouseUp,
   exitSelectionMode,
+  onSelectAll,
   onDragStart,
   onDragEnd,
   onRestore,
@@ -319,6 +322,35 @@ export function NoteList({
   const [newMenuFromFab, setNewMenuFromFab] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
   const fabRef = useRef<HTMLDivElement>(null);
+
+  // 需求：选中/全选后，点击任意“空白处”都能取消选中（不仅仅是卡片间隙）
+  // 用 document 捕获事件兜底，避免某些布局空白不在容器点击范围内导致不生效
+  useEffect(() => {
+    if (!isSelectionMode) return;
+
+    const shouldIgnore = (target: HTMLElement | null) => {
+      if (!target) return true;
+      return !!(
+        target.closest("[data-note-card]") ||
+        target.closest("[data-subfolder-card]") ||
+        target.closest("[data-selection-dock]") ||
+        target.closest("[data-note-list-header]")
+      );
+    };
+
+    const onPointerDown = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (shouldIgnore(target)) return;
+      exitSelectionMode();
+    };
+
+    document.addEventListener("mousedown", onPointerDown, true);
+    document.addEventListener("touchstart", onPointerDown, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown, true);
+      document.removeEventListener("touchstart", onPointerDown, true);
+    };
+  }, [isSelectionMode, exitSelectionMode]);
 
   const openNewMenu = (fromFab: boolean) => {
     setNewMenuFromFab(fromFab);
@@ -347,10 +379,25 @@ export function NoteList({
       <div
         className="flex flex-col h-[calc(100dvh-6rem)] max-h-[calc(100dvh-6rem)] min-h-0"
         onClick={(e) => {
-          if (e.target === e.currentTarget && isSelectionMode) exitSelectionMode();
+          if (!isSelectionMode) return;
+          const target = e.target as HTMLElement;
+          // 需求：选中后点击“旁边空白处”也能取消选中
+          // 规则：只要点击不在卡片内、也不在 Dock / 顶部工具栏内，就退出选择模式
+          if (
+            target.closest("[data-note-card]") ||
+            target.closest("[data-subfolder-card]") ||
+            target.closest("[data-selection-dock]") ||
+            target.closest("[data-note-list-header]")
+          ) {
+            return;
+          }
+          exitSelectionMode();
         }}
       >
-        <header className="shrink-0 bg-background/80 backdrop-blur z-10 border-b border-border/40">
+        <header
+          data-note-list-header
+          className="shrink-0 bg-background/80 backdrop-blur z-10 border-b border-border/40"
+        >
           <div className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <Button
@@ -629,6 +676,7 @@ export function NoteList({
               ? "translate-y-0 opacity-100"
               : "translate-y-20 opacity-0 pointer-events-none"
           )}
+          data-selection-dock
         >
           <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
             <button
@@ -659,6 +707,37 @@ export function NoteList({
               </>
             ) : (
               <>
+                {/* 全选 / 取消全选 */}
+                {(() => {
+                  const allIds = [
+                    ...(!showTrash ? filteredSubFolders.map((f) => f.id) : []),
+                    ...filteredNotes.map((n) => n.id),
+                  ];
+                  const allSelected =
+                    allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+                  return (
+                    <div
+                      className={cn(
+                        "flex flex-col items-center gap-1 transition-all",
+                        allIds.length === 0
+                          ? "opacity-30 grayscale cursor-not-allowed"
+                          : "cursor-pointer hover:scale-110"
+                      )}
+                      onClick={() => {
+                        if (allIds.length === 0) return;
+                        if (allSelected) exitSelectionMode();
+                        else onSelectAll(allIds);
+                      }}
+                      title={allSelected ? "取消全选" : "全选"}
+                    >
+                      <div className="p-2 bg-accent rounded-lg">
+                        <CheckSquare className="w-5 h-5" />
+                      </div>
+                      <span className="text-[10px]">{allSelected ? "取消全选" : "全选"}</span>
+                    </div>
+                  );
+                })()}
+
                 <div
                   className={cn(
                     "flex flex-col items-center gap-1 transition-all",

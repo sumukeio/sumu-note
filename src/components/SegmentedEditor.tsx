@@ -426,58 +426,85 @@ export default function SegmentedEditor({
     if (!html.trim()) return '';
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    const walk = (node: Node): string => {
-      if (node.nodeType === Node.TEXT_NODE) return (node.textContent || '').replace(/\s+/g, ' ');
+    const normalizeInlineText = (s: string) =>
+      // 保留换行，只折叠连续空格/制表符，避免把 Markdown 段落“压成一团”
+      s.replace(/[ \t]+/g, ' ').replace(/\u00a0/g, ' ');
+
+    const walk = (node: Node, ctx: { inPre: boolean }): string => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const raw = node.textContent || '';
+        return ctx.inPre ? raw : normalizeInlineText(raw);
+      }
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
       const el = node as HTMLElement;
       const tag = el.tagName.toLowerCase();
-      const children = Array.from(el.childNodes).map(walk).join('');
-      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      const nextCtx = { ...ctx, inPre: ctx.inPre || tag === 'pre' };
+      const children = Array.from(el.childNodes).map((n) => walk(n, nextCtx)).join('');
+      const text = ctx.inPre ? (el.textContent || '') : normalizeInlineText(el.textContent || '').trim();
+      const childText = children.trim() ? children : text;
+
       switch (tag) {
         case 'strong':
         case 'b':
-          return `**${text}**`;
+          return `**${childText.trim()}**`;
         case 'em':
         case 'i':
-          return `*${text}*`;
+          return `*${childText.trim()}*`;
         case 'h1':
-          return `# ${text}\n`;
+          return `# ${childText.trim()}\n\n`;
         case 'h2':
-          return `## ${text}\n`;
+          return `## ${childText.trim()}\n\n`;
         case 'h3':
-          return `### ${text}\n`;
+          return `### ${childText.trim()}\n\n`;
         case 'h4':
         case 'h5':
         case 'h6':
-          return `${'#'.repeat(parseInt(tag[1], 10))} ${text}\n`;
-        case 'p':
-        case 'div':
-          return `${text}\n`;
+          return `${'#'.repeat(parseInt(tag[1], 10))} ${childText.trim()}\n\n`;
         case 'br':
           return '\n';
-        case 'ul':
-          return Array.from(el.querySelectorAll(':scope > li'))
-            .map((li) => `- ${(li.textContent || '').trim()}`)
-            .join('\n') + '\n';
-        case 'ol':
-          return Array.from(el.querySelectorAll(':scope > li'))
-            .map((li, i) => `${i + 1}. ${(li.textContent || '').trim()}`)
-            .join('\n') + '\n';
-        case 'blockquote':
-          return (el.textContent || '')
-            .split('\n')
-            .filter((l) => l.trim())
-            .map((l) => `> ${l.trim()}`)
-            .join('\n') + '\n';
+        case 'pre': {
+          const code = el.textContent || '';
+          const fenced = code.replace(/\n+$/, '');
+          return `\n\`\`\`\n${fenced}\n\`\`\`\n\n`;
+        }
         case 'code':
-          return el.closest('pre') ? text : `\`${text}\``;
+          return el.closest('pre') ? (el.textContent || '') : `\`${childText.trim()}\``;
+        case 'p':
+          return `${childText.trim()}\n\n`;
+        case 'div':
+          // div 可能是段落容器：若包含 block 子元素，让 children 自己决定换行；否则当作一段
+          return el.querySelector('p,div,pre,ul,ol,blockquote,h1,h2,h3,h4,h5,h6,table')
+            ? `${children}\n`
+            : `${childText.trim()}\n\n`;
+        case 'ul':
+          return (
+            Array.from(el.querySelectorAll(':scope > li'))
+              .map((li) => `- ${normalizeInlineText(li.textContent || '').trim()}`)
+              .join('\n') + '\n\n'
+          );
+        case 'ol':
+          return (
+            Array.from(el.querySelectorAll(':scope > li'))
+              .map((li, i) => `${i + 1}. ${normalizeInlineText(li.textContent || '').trim()}`)
+              .join('\n') + '\n\n'
+          );
+        case 'blockquote': {
+          const raw = (el.textContent || '').replace(/\r\n/g, '\n');
+          const quoted = raw
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .map((l) => `> ${l}`)
+            .join('\n');
+          return `${quoted}\n\n`;
+        }
         case 'a':
-          return `[${text}](${el.getAttribute('href') || '#'})`;
+          return `[${childText.trim()}](${el.getAttribute('href') || '#'})`;
         default:
           return children || text;
       }
     };
-    return walk(tmp).replace(/\n{3,}/g, '\n\n').trim();
+    return walk(tmp, { inPre: false }).replace(/\n{3,}/g, '\n\n').trim();
   }, []);
 
   /**
@@ -1537,9 +1564,23 @@ export default function SegmentedEditor({
 
                 // 未命中表格规则：直接粘贴（富文本转 Markdown 或纯文本）
                 let processedText = pastedText ?? "";
-                if (htmlData && processedText === pastedText) {
+                const plain = pastedText ?? "";
+                const looksLikeMarkdown =
+                  /(^|\n)\s*#{1,6}\s+\S/.test(plain) ||
+                  /(^|\n)\s*([-*+]|(\d+\.))\s+\S/.test(plain) ||
+                  /(^|\n)\s*>+\s+\S/.test(plain) ||
+                  /(^|\n)\s*```/.test(plain) ||
+                  /(^|\n)\s*\|.+\|\s*$/.test(plain) ||
+                  /\[[^\]]+\]\([^)]+\)/.test(plain);
+                const plainHasNewlines = /\r?\n/.test(plain);
+
+                // 关键：如果用户粘贴的是 Markdown（或至少是多行文本），优先信任 text/plain，避免 HTML 解析把换行压没
+                if (!plain && htmlData) {
                   processedText = htmlToMarkdown(htmlData);
-                  if (!processedText.trim()) processedText = pastedText ?? "";
+                } else if (!looksLikeMarkdown && !plainHasNewlines && htmlData) {
+                  // 单行且不像 Markdown：更可能是网页富文本/格式化内容，尝试转 Markdown
+                  const fromHtml = htmlToMarkdown(htmlData);
+                  if (fromHtml.trim()) processedText = fromHtml;
                 }
                 processedText = processedText.replace(/\n{3,}/g, "\n\n").trim();
 
@@ -1567,6 +1608,17 @@ export default function SegmentedEditor({
                   scrollLeft: textarea.scrollLeft,
                 };
                 activeTextareaIndexRef.current = segmentIndex;
+
+                // 移动端：避免键盘遮挡正在编辑位置
+                if (isMobileWritingMode) {
+                  requestAnimationFrame(() => {
+                    try {
+                      textarea.scrollIntoView({ block: "center", inline: "nearest" });
+                    } catch {
+                      // ignore
+                    }
+                  });
+                }
               }}
               onClick={(e) => {
                 // 编辑态“智能识别链接”：单击命中链接时弹出应用内部确认弹窗
