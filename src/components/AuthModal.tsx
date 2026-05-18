@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { ensureSessionAfterSignIn } from "@/lib/auth-utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -58,11 +59,18 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
 
     try {
       if (type === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
         if (error) throw error;
+
+        const session =
+          data.session ?? (await ensureSessionAfterSignIn());
+        if (!session) {
+          throw new Error("登录成功但会话未就绪，请重试");
+        }
+
         // 使用 replace 避免历史中保留登录页，提升手机端返回手势体验
         router.replace("/dashboard");
         onClose();

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
+import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import { Loader2, ArrowLeft, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -19,8 +20,8 @@ import {
 export default function SettingsPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [user, setUser] = useState<{ id: string } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading: authLoading, authError, retry } = useRequireAuth();
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<UserSettings>({
     timezone: "Asia/Shanghai",
@@ -29,42 +30,26 @@ export default function SettingsPage() {
   const timezones = getCommonTimezones();
 
   useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
+    if (!user?.id) return;
 
-        if (error) {
-          console.error("Auth error:", error);
-          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
-            await supabase.auth.signOut();
-            router.replace("/");
-            return;
-          }
-        }
+    let cancelled = false;
+    setSettingsLoading(true);
 
-        if (!user) {
-          router.replace("/");
-          return;
-        }
+    getUserSettings(user.id)
+      .then((userSettings) => {
+        if (!cancelled) setSettings(userSettings);
+      })
+      .catch((error) => {
+        console.error("Failed to load settings:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
+      });
 
-        setUser(user);
-
-        // 加载用户设置
-        const userSettings = await getUserSettings(user.id);
-        setSettings(userSettings);
-      } catch (error) {
-        console.error("Failed to check user:", error);
-        router.replace("/");
-      } finally {
-        setLoading(false);
-      }
+    return () => {
+      cancelled = true;
     };
-
-    checkUser();
-  }, [router]);
+  }, [user?.id]);
 
   const handleSave = async () => {
     if (!user) return;
@@ -89,16 +74,22 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
+  if (!user) {
+    return (
+      <AuthLoadingScreen
+        loading={authLoading}
+        authError={authError}
+        onRetry={retry}
+      />
+    );
+  }
+
+  if (settingsLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
       </div>
     );
-  }
-
-  if (!user) {
-    return null;
   }
 
   return (

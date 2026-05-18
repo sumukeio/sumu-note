@@ -1,69 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { Loader2 } from "lucide-react";
+import { useParams } from "next/navigation";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
+import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import MindNoteEditor from "@/components/MindNoteEditor";
 
 export default function MindNoteDetailPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
-  const [user, setUser] = useState<{ id: string } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading, authError, retry } = useRequireAuth();
 
-  useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
-
-        // 处理 refresh token 错误
-        if (error) {
-          console.error("Auth error:", error);
-          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
-            await supabase.auth.signOut();
-            router.replace("/");
-            return;
-          }
-        }
-
-        if (!user) {
-          router.replace("/");
-          return;
-        }
-        setUser(user);
-        setLoading(false);
-      } catch (err) {
-        console.error("Failed to check user:", err);
-        router.replace("/");
-      }
-    };
-    checkUser();
-  }, [router]);
-
-  if (loading) {
+  if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-      </div>
+      <AuthLoadingScreen loading={loading} authError={authError} onRetry={retry} />
     );
   }
 
-  if (!user || !params.id) {
+  if (!params.id) {
     return null;
   }
 
   return <MindNoteEditor mindNoteId={params.id} userId={user.id} />;
 }
-
-
-
-
-
-
-
-
-

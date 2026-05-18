@@ -4,6 +4,8 @@ import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
+import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import { getNoteFolderId, getFolderAncestorStack, searchNotes } from "@/lib/note-service";
 import { getRecentNotes, type RecentNoteEntry } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
@@ -62,8 +64,7 @@ function getContentSnippet(content: string, query: string, maxLength: number = 1
 function DashboardPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading, authError, retry } = useRequireAuth();
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 
   // 🔥 状态：当前查看的文件夹 (null 代表看根目录文件夹列表)
@@ -89,36 +90,6 @@ function DashboardPageContent() {
     handleBack: () => {},
     currentFolder: null,
   });
-
-  useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const { data: { user }, error } = await supabase.auth.getUser();
-        
-        // 处理 refresh token 错误
-        if (error) {
-          console.error("Auth error:", error);
-          // 如果是 refresh token 错误，清除 session 并重定向
-          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
-            await supabase.auth.signOut();
-            router.replace("/");
-            return;
-          }
-        }
-        
-        if (!user) { 
-          router.replace("/"); 
-          return; 
-        }
-      setUser(user);
-      setLoading(false);
-      } catch (err) {
-        console.error("Failed to check user:", err);
-        router.replace("/");
-      }
-    };
-    checkUser();
-  }, [router]);
 
   // 最近打开：本地读取（仅用于 dashboard 展示）
   useEffect(() => {
@@ -464,7 +435,11 @@ function DashboardPageContent() {
     setIsExportDialogOpen(true);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (!user) {
+    return (
+      <AuthLoadingScreen loading={loading} authError={authError} onRetry={retry} />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">

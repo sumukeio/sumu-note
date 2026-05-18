@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 import { getDashboardStats, DashboardStats } from "@/lib/stats";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
+import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -38,54 +39,52 @@ function getFolderColor(index: number): string {
 
 export default function StatsPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user, loading: authLoading, authError, retry } = useRequireAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const run = async () => {
-      try {
-      const {
-        data: { user },
-          error,
-      } = await supabase.auth.getUser();
+    if (!user?.id) return;
 
-        // 处理 refresh token 错误
-        if (error) {
-          console.error("Auth error:", error);
-          if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
-            await supabase.auth.signOut();
-            router.replace("/");
-            return;
-          }
-        }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
 
-      if (!user) {
-        router.replace("/");
-        return;
-      }
-      setUserId(user.id);
-      try {
-        const result = await getDashboardStats(user.id);
-        setStats(result);
-      } catch (err: any) {
+    getDashboardStats(user.id)
+      .then((result) => {
+        if (!cancelled) setStats(result);
+      })
+      .catch((err: unknown) => {
         console.error(err);
-        setError(err?.message || "加载统计数据失败");
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "加载统计数据失败"
+          );
         }
-      } catch (err) {
-        console.error("Failed to check user:", err);
-        router.replace("/");
-      } finally {
-        setLoading(false);
-      }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
     };
-    run();
-  }, [router]);
+  }, [user?.id]);
 
   const handleBack = () => {
     router.push("/dashboard");
   };
+
+  if (!user) {
+    return (
+      <AuthLoadingScreen
+        loading={authLoading}
+        authError={authError}
+        onRetry={retry}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -125,7 +124,7 @@ export default function StatsPage() {
           <main className="space-y-8">
             <TopCards stats={stats} />
             <HeatmapSection stats={stats} />
-            <BottomSection stats={stats} userId={userId} />
+            <BottomSection stats={stats} userId={user.id} />
           </main>
         )}
       </div>

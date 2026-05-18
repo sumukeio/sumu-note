@@ -3,6 +3,7 @@
 import { useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { ensureSessionAfterSignIn } from "@/lib/auth-utils";
 import { Loader2 } from "lucide-react";
 
 function AuthCallbackContent() {
@@ -25,12 +26,14 @@ function AuthCallbackContent() {
             if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
               await supabase.auth.signOut();
             }
-            router.push("/?error=auth_failed");
+            router.replace("/?error=auth_failed");
             return;
           }
 
-          if (data.session) {
-            router.push("/dashboard");
+          const session =
+            data.session ?? (await ensureSessionAfterSignIn());
+          if (session) {
+            router.replace("/dashboard");
             return;
           }
         }
@@ -44,18 +47,19 @@ function AuthCallbackContent() {
           if (error.message?.includes("Refresh Token") || error.message?.includes("JWT")) {
             await supabase.auth.signOut();
           }
-          router.push("/?error=auth_failed");
+          router.replace("/?error=auth_failed");
           return;
         }
 
-        if (data.session) {
-          router.push("/dashboard");
+        const session = data.session ?? (await ensureSessionAfterSignIn());
+        if (session) {
+          router.replace("/dashboard");
         } else {
-          router.push("/?error=no_session");
+          router.replace("/?error=no_session");
         }
       } catch (e) {
         console.error("Auth callback exception:", e);
-        router.push("/?error=auth_failed");
+        router.replace("/?error=auth_failed");
       }
     };
 
