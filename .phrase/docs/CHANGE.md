@@ -11,6 +11,7 @@
 
 | 日期 | 阶段 | 摘要 | 详情 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task017：issue002 轻量进文件夹 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task016：issue002 进文件夹白屏 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task015：issue002 禁首页自动跳 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task014：issue002 去 dynamic 卡死 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |

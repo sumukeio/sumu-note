@@ -13,7 +13,7 @@ import {
   type RecentNoteEntry,
 } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
-import NoteFolderLazy, { preloadNoteManager } from "@/components/NoteFolderLazy";
+import LightFolderNotes from "@/components/LightFolderNotes";
 import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,7 +72,6 @@ function DashboardHomeClient({ user }: { user: User }) {
 
   useEffect(() => {
     pushAuthDebug("dashboard-home:mount", { userId: user.id });
-    preloadNoteManager();
   }, [user.id]);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [openingRecent, setOpeningRecent] = useState(false);
@@ -689,8 +688,8 @@ function DashboardHomeClient({ user }: { user: User }) {
             )}
           </section>
         ) : currentFolder ? (
-            // 👀 模式 B: 查看笔记（懒加载 NoteManager，避免 iOS 白屏死转圈）
-            <NoteFolderLazy
+            // 👀 模式 B: iOS 用轻量列表（NoteManager 大包在真机上 import 永不完成）
+            <LightFolderNotes
                 userId={user.id}
                 folderId={currentFolder.id}
                 folderName={currentFolder.name}

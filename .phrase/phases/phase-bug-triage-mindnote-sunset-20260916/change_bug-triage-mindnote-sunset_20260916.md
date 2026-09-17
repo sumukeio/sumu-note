@@ -3,6 +3,16 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task017 issue002 续修：轻量进文件夹
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `LightFolderNotes.tsx` | 轻量列表/新建/textarea 编辑，不依赖 NoteManager |
+| Modify | `DashboardHomeClient.tsx` | 进文件夹改用 LightFolderNotes |
+
+**日志证据**：`note-manager:import-timeout` 反复出现且无 `import-ok`/`preload-ok`。  
+**验证**：type-check 通过。
+
 ## 2026-09-17 — task016 issue002 续修：进文件夹白屏
 
 | 动作 | 路径 | 说明 |

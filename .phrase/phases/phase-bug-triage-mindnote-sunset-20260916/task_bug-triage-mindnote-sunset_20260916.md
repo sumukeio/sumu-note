@@ -66,9 +66,13 @@
   **验证**：`npm run type-check` 通过。  
   **影响范围**：`NoteFolderLazy.tsx`、`NoteManager.tsx`、`DashboardHomeClient.tsx`、`AuthDebugPanel.tsx`。
 
+- [x] **task017** 产出：issue002 续修——`LightFolderNotes` 替代 NoteManager 动态加载（iOS import 挂死）。  
+  **验证**：`npm run type-check` 通过。  
+  **影响范围**：`LightFolderNotes.tsx`、`DashboardHomeClient.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机点文件夹，看绿条 `note-manager:*`；成功则考虑关闭 issue002。  
+- 下一建议：真机点文件夹确认列表/编辑；确认后可关 issue002（完整 NoteManager 可后续再优化）。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

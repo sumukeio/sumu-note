@@ -6,6 +6,12 @@
 
 ## 2026-09-17
 
+### 🔧 issue002 续修：轻量进文件夹（task017）
+
+- **现象**：`note-manager:import-start` 后 15s 必 `import-timeout`（大包在 iPhone 上永不完成）
+- **处理**：新增 `LightFolderNotes`（列表/新建/简易编辑），进文件夹不再动态加载 NoteManager
+- **手测**：点文件夹应见 `light-folder:mount` → `load-ok`；可打开/新建/保存笔记
+
 ### 🔧 issue002 续修：进文件夹白屏（task016）
 
 - **现象**：能进工作台文件夹列表；点文件夹后白屏转圈
