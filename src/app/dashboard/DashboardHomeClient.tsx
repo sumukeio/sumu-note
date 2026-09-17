@@ -14,6 +14,8 @@ import {
 } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
 import LightFolderNotes from "@/components/LightFolderNotes";
+import NoteFolderLazy from "@/components/NoteFolderLazy";
+import { shouldUseLightFolderNotes } from "@/lib/client-capability";
 import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,9 +71,15 @@ function getContentSnippet(content: string, query: string, maxLength: number = 1
 function DashboardHomeClient({ user }: { user: User }) {
   const router = useRouter();
   const { toast } = useToast();
+  const [useLightFolder, setUseLightFolder] = useState(false);
 
   useEffect(() => {
-    pushAuthDebug("dashboard-home:mount", { userId: user.id });
+    const light = shouldUseLightFolderNotes();
+    setUseLightFolder(light);
+    pushAuthDebug("dashboard-home:mount", {
+      userId: user.id,
+      folderMode: light ? "light" : "full",
+    });
   }, [user.id]);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [openingRecent, setOpeningRecent] = useState(false);
@@ -688,14 +696,15 @@ function DashboardHomeClient({ user }: { user: User }) {
             )}
           </section>
         ) : currentFolder ? (
-            // 👀 模式 B: iOS 用轻量列表（NoteManager 大包在真机上 import 永不完成）
+            // 👀 模式 B: iPhone/iPod 轻量；安卓/PC/iPad 完整 NoteManager
+            useLightFolder ? (
             <LightFolderNotes
                 userId={user.id}
                 folderId={currentFolder.id}
                 folderName={currentFolder.name}
                 onBack={handleBack}
                 onEnterFolder={(id, name) => {
-                  pushAuthDebug("folder:enter-sub", { id, name });
+                  pushAuthDebug("folder:enter-sub", { id, name, mode: "light" });
                   if (currentFolder) {
                     setFolderStack(prev => [...prev, currentFolder]);
                   }
@@ -704,12 +713,33 @@ function DashboardHomeClient({ user }: { user: User }) {
                 initialNoteId={initialNoteId}
                 onInitialNoteOpened={() => setInitialNoteId(null)}
             />
+            ) : (
+            <NoteFolderLazy
+                userId={user.id}
+                folderId={currentFolder.id}
+                folderName={currentFolder.name}
+                onBack={handleBack}
+                onEnterFolder={(id, name) => {
+                  pushAuthDebug("folder:enter-sub", { id, name, mode: "full" });
+                  if (currentFolder) {
+                    setFolderStack(prev => [...prev, currentFolder]);
+                  }
+                  setCurrentFolder({ id, name });
+                }}
+                initialNoteId={initialNoteId}
+                onInitialNoteOpened={() => setInitialNoteId(null)}
+            />
+            )
         ) : (
             // 👀 模式 A: 查看文件夹列表 (默认)
             <FolderManager 
                 userId={user.id} 
                 onEnterFolder={(id, name) => {
-                  pushAuthDebug("folder:enter", { id, name });
+                  pushAuthDebug("folder:enter", {
+                    id,
+                    name,
+                    mode: useLightFolder ? "light" : "full",
+                  });
                   // 从根目录进入文件夹时，清空栈
                   setFolderStack([]);
                   setCurrentFolder({ id, name });

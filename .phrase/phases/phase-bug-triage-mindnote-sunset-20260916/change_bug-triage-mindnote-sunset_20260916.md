@@ -3,6 +3,16 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task018 issue002 双轨：iPhone 轻量 / 其余完整
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `client-capability.ts` + 测试 | `shouldUseLightFolderNotes`（仅 iPhone/iPod） |
+| Modify | `DashboardHomeClient.tsx` | 轻量 / NoteFolderLazy 分流 |
+| Modify | `LightFolderNotes.tsx` | Dock 点击、置顶、回收站、移动、同步提示、版本历史、列表缓存 |
+
+**验证**：client-capability 6 passed；type-check 通过。
+
 ## 2026-09-17 — task017 issue002 续修：轻量进文件夹
 
 | 动作 | 路径 | 说明 |

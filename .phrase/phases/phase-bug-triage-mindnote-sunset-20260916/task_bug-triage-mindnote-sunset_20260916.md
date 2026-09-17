@@ -70,9 +70,13 @@
   **验证**：`npm run type-check` 通过。  
   **影响范围**：`LightFolderNotes.tsx`、`DashboardHomeClient.tsx`。
 
+- [x] **task018** 产出：双轨——iPhone/iPod 增强轻量；安卓/PC/iPad 完整 NoteManager；能力探测单测。  
+  **验证**：`tests/lib/client-capability.test.ts` 通过；`npm run type-check` 通过。  
+  **影响范围**：`client-capability.ts`、`LightFolderNotes.tsx`、`DashboardHomeClient.tsx`、`NoteFolderLazy.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机点文件夹确认列表/编辑；确认后可关 issue002（完整 NoteManager 可后续再优化）。  
+- 下一建议：iPhone 验轻量 Dock/回收站；安卓或 PC 验完整编辑器 → 确认后关 issue002。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

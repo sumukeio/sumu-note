@@ -6,6 +6,13 @@
 
 ## 2026-09-17
 
+### 🔧 issue002 续修：双轨文件夹（task018）
+
+- **策略**：iPhone/iPod → 增强轻量 `LightFolderNotes`；安卓/PC/iPad → 动态完整 `NoteManager`
+- **轻量保留**：Dock 点击、置顶、回收站、批量移动/删除、同步提示、简化版本历史与列表缓存
+- **轻量砍掉**：分段编辑/表格/格式条/发布/拖拽 Dock/补全/字数
+- **验证**：client-capability 6 passed；`tsc --noEmit` 通过
+
 ### 🔧 issue002 续修：轻量进文件夹（task017）
 
 - **现象**：`note-manager:import-start` 后 15s 必 `import-timeout`（大包在 iPhone 上永不完成）
