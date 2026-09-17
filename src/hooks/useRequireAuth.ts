@@ -15,28 +15,44 @@ export function useRequireAuth() {
     setLoading(true);
     setAuthError(null);
 
-    const result = await resolveAuthUser();
-
-    if (result.status === "ok") {
-      setUser(result.user);
+    let settled = false;
+    // 总闸：避免 iOS 上 getSession 挂死导致永久白屏转圈
+    const safety = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      setAuthError(
+        "验证登录状态超时，请重试。若反复出现，请关闭无痕模式后重试。"
+      );
       setLoading(false);
-      return;
-    }
+    }, 10_000);
 
-    if (result.status === "unauthenticated") {
-      setUser(null);
+    try {
+      const result = await resolveAuthUser();
+      if (settled) return;
+      settled = true;
+
+      if (result.status === "ok") {
+        setUser(result.user);
+        setLoading(false);
+        return;
+      }
+
+      if (result.status === "unauthenticated") {
+        setUser(null);
+        setLoading(false);
+        router.replace("/?auth=required");
+        return;
+      }
+
+      if (result.kind === "timeout") {
+        setAuthError("网络较慢或连接超时，请检查网络后重试");
+      } else {
+        setAuthError(result.message ?? "验证登录状态失败，请重试");
+      }
       setLoading(false);
-      // 带回标记，落地页可提示并打开登录（避免「进不去又不报错」）
-      router.replace("/?auth=required");
-      return;
+    } finally {
+      window.clearTimeout(safety);
     }
-
-    if (result.kind === "timeout") {
-      setAuthError("网络较慢或连接超时，请检查网络后重试");
-    } else {
-      setAuthError(result.message ?? "验证登录状态失败，请重试");
-    }
-    setLoading(false);
   }, [router]);
 
   useEffect(() => {

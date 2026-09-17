@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, getAuthStorageMode } from "@/lib/supabase";
 import { ensureSessionAfterSignIn } from "@/lib/auth-utils";
-import { shouldHardNavigateAfterLogin } from "@/lib/auth-session-resilience";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -94,15 +93,8 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
 
         onClose();
 
-        // iOS WebKit：软跳转后偶发读不到刚写入的 session → 硬跳更稳（localStorage 可用时）
-        if (
-          typeof window !== "undefined" &&
-          shouldHardNavigateAfterLogin(storageMode)
-        ) {
-          window.location.assign("/dashboard");
-        } else {
-          router.replace("/dashboard");
-        }
+        // iOS：硬跳转整页重载后 getSession 可能挂死转圈；同页软跳可复用内存会话
+        router.replace("/dashboard");
       } else {
         const { error } = await supabase.auth.signUp({
           email,

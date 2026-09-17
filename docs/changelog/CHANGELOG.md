@@ -6,6 +6,12 @@
 
 ## 2026-09-17
 
+### 🔧 issue002 续修：登录后白屏转圈（task011）
+
+- **现象**：已显示「登录成功」；dashboard 白屏中间转圈
+- **处理**：`getSession` 单次超时；localStorage 解析 user 降级；鉴权 UI 10s 总闸；改回软跳转（避免整页重载挂死）
+- **验证**：`tests/lib/auth-session-resilience.test.ts` 6 passed
+
 ### 🐛 issue002 iPhone 登录后进不去（task011） ✅（待真机确认）
 
 - **环境**：iPhone 8 Plus · iOS 16.3.1 · 多浏览器；首页/登录可开，登录后静默进不去

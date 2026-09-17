@@ -15,8 +15,9 @@
 | Modify | `supabase.ts` | 暴露 `getAuthStorageMode` |
 
 **环境**：iPhone 8 Plus · iOS 16.3.1 · 多浏览器同现 · 首页/登录可进 · 登录后静默进不去。  
-**验证**：auth-session-resilience 3 passed；type-check 通过。  
-**手测**：该机登录应出现「登录成功」并进入工作台；失败应有明确提示。
+**续修**：登录成功后曾白屏转圈 → `getSession` 加超时、storage 降级、鉴权 10s 总闸；改回软跳转。  
+**验证**：auth-session-resilience 6 passed；type-check 通过。  
+**手测**：该机登录应进入工作台；最多约 10s 应出现超时重试而非永久转圈。
 
 ## 2026-09-17 — task010 修复 issue001 Toast 挡标题 / 新建页态
 
