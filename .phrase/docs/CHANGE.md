@@ -11,6 +11,7 @@
 
 | 日期 | 阶段 | 摘要 | 详情 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task013：issue002 鉴权移出 Suspense | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task012：issue002 硬跳+根级调试条 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task011：issue002 iOS 登录进不去 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task010：issue001 Toast/新建页态 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |

@@ -50,9 +50,13 @@
   **验证**：`npm test -- --run tests/lib/auth-login-handoff.test.ts tests/lib/auth-session-resilience.test.ts` 通过；`npm run type-check` 通过。  
   **影响范围**：`auth-login-handoff.ts`、`useRequireAuth.tsx`、`AuthModal.tsx`、`layout.tsx`、`AuthDebugPanel.tsx`。
 
+- [x] **task013** 产出：issue002 续修——鉴权移出 Suspense；`DashboardHomeClient` 动态加载；html-boot 信标。  
+  **验证**：`npm test -- --run tests/lib/auth-login-handoff.test.ts` 通过；`npm run type-check` 通过。  
+  **影响范围**：`dashboard/page.tsx`、`DashboardHomeClient.tsx`、`layout.tsx`、`AuthBootBeacon.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机复验 issue002（task012）；或开启思维笔记下线实施。  
+- 下一建议：真机复验 issue002（task013）；看绿条是否出现 `html-boot` path=/dashboard 与 `requireAuth:admit:*`。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

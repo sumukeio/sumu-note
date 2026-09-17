@@ -135,6 +135,7 @@ export function isAuthDebugEnabled(): boolean {
 }
 
 export function dashboardUrlWithDebug(): string {
-  if (typeof window === "undefined") return "/dashboard";
-  return isAuthDebugEnabled() ? "/dashboard?debugAuth=1" : "/dashboard";
+  // 故意不带 ?debugAuth=1：避免 iOS 上 useSearchParams/Suspense 卡死；
+  // 调试开关已写入 localStorage，绿条仍会显示。
+  return "/dashboard";
 }

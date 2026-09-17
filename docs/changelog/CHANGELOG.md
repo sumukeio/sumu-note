@@ -6,6 +6,13 @@
 
 ## 2026-09-17
 
+### 🔧 issue002 续修：Suspense 卡死白屏（task013）
+
+- **现象**：`login:hard-nav` 后无任何 `requireAuth:*`；`/dashboard` 白屏转圈
+- **根因**：鉴权写在 `useSearchParams` 的 Suspense 内，iOS 上可能永不 resolve
+- **处理**：轻量 `DashboardAuthGate` 先鉴权；主界面 dynamic 加载；跳转目标改为纯 `/dashboard`；`html-boot` 信标
+- **验证**：auth-login-handoff 4 passed；`tsc --noEmit` 通过
+
 ### 🔧 issue002 续修：白屏无调试条 + 硬跳放行（task012）
 
 - **现象**：登录后白屏转圈；仅 `/?debugAuth=1` 能见绿条，白屏页加参仍空白

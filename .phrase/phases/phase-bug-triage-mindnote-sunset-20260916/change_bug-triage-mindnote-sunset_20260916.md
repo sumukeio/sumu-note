@@ -3,6 +3,18 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task013 issue002 续修：鉴权移出 Suspense
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `DashboardHomeClient.tsx` | 原 dashboard 主界面（含 useSearchParams） |
+| Modify | `dashboard/page.tsx` | 轻量 AuthGate；dynamic 加载主界面 |
+| Modify | `layout.tsx` | `html-boot` 内联信标 + AuthBootBeacon |
+| Modify | `auth-login-handoff.ts` | 跳转目标固定 `/dashboard`（debug 靠 localStorage） |
+
+**日志证据**：hard-nav 后无 `requireAuth:*` → Suspense 内鉴权未执行。  
+**验证**：handoff 测试 + type-check 通过。
+
 ## 2026-09-17 — task012 issue002 续修：硬跳 + 根级调试条
 
 | 动作 | 路径 | 说明 |

@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 import ViewportVars from "@/components/ViewportVars";
 import AuthDebugPanel from "@/components/AuthDebugPanel";
+import AuthBootBeacon from "@/components/AuthBootBeacon";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,6 +27,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning> 
       <head />
       <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var q=location.search.indexOf('debugAuth=1')>=0;var on=q||localStorage.getItem('sumu:debugAuth')==='1';if(q)localStorage.setItem('sumu:debugAuth','1');if(!on)return;var k='sumu:auth-debug';var list=[];try{list=JSON.parse(localStorage.getItem(k)||'[]')}catch(e){}list.push({t:Date.now(),step:'html-boot',detail:{path:location.pathname+location.search}});localStorage.setItem(k,JSON.stringify(list.slice(-50)));}catch(e){}})();`,
+          }}
+        />
         <ViewportVars />
         {/* 2. 包裹内容，设置默认属性 */}
         <ThemeProvider
@@ -36,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           >
             {children}
             <Toaster />
+            <AuthBootBeacon />
             <AuthDebugPanel />
           </ThemeProvider>
       </body>
