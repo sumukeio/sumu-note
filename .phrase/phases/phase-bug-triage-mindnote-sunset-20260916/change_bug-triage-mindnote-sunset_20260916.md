@@ -3,6 +3,25 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — 文档澄清：拆包/轻量增量动机与受众
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md` | 轻量已增强清单；拆包≠安卓现网；增量按需 |
+| Modify | `ISSUES.md` / `task_*` / `issue_triage_*` | 纠正「下一项默认开拆包/增量」表述 |
+| Modify | `CHANGELOG.md` | 追加澄清条目 |
+
+## 2026-09-17 — task021 关闭 issue002 + 文档落盘
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `ISSUES.md` / `issue_triage_*` | issue002 → `[x]`；Resolved At/By |
+| Add | `docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md` | 结案说明：根因簇、双轨、手测、遗留 |
+| Modify | `MOBILE_TESTING.md` / `docs/README.md` | 双轨与调试指引；路由表 |
+| Modify | `CHANGELOG.md` | 追加关闭与文档条目 |
+
+**验证**：交叉链接齐全；本 phase task001–021 中 issue 修复链已闭环。
+
 ## 2026-09-17 — task020 issue002 UI：多选顶栏 / Toast / 调试 / select-none
 
 | 动作 | 路径 | 说明 |

@@ -6,6 +6,35 @@
 
 ## 2026-09-17
 
+### 📝 澄清：NoteManager 拆包 / 轻量增量不是必做下一项
+
+- **轻量已增强**（issue002 关闭所需能力已齐）；「增量」= 可选从砍掉矩阵加回，只服务 iPhone/iPod  
+- **NoteManager 拆包**：不为修安卓/PC 现网故障（完整轨已可用）；动机是首屏/中端机韧性与长期架构  
+- **下一项默认建议**：思维笔记下线实施；拆包/轻量增量无痛点则搁置  
+- 详见 [`guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`](../guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md)「可选后续」
+
+### ✅ issue002 关闭 + 文档落盘（task021）
+
+- **关闭**：iPhone 8 Plus / iOS 16.3.1 登录→工作台→文件夹可用；双轨策略定稿
+- **结案指南**：[`docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`](../guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md)
+- **索引**：`.phrase/docs/ISSUES.md`、分诊详情、移动端测试指南、文档路由表已同步
+- **遗留（不阻塞）**：见结案指南「可选后续」——拆包/轻量增量均非必做
+
+### 📋 本轮分诊收束（issue001–010，2026-09-16～17）
+
+| Issue | 要点 |
+| :--- | :--- |
+| issue001 | Toast 贴底；空白新建直进编辑 |
+| issue002 | 硬跳 handoff + iPhone 轻量双轨（本条目关闭） |
+| issue003 | 最近打开云端全局 + 手机点击直开（需 SQL） |
+| issue004 | 自动标题上限 10 |
+| issue005 | `/p` 公开页 + RLS SQL |
+| issue006 | 统计单次拉取 + 失败可重试 |
+| issue007 | 字数=非空白；编辑态实时统计 |
+| issue008 | 链接防误触（Cmd/Ctrl / 长按） |
+| issue009 | 移动浮层不被空白点击清选中 |
+| issue010 | 删文件夹叶子优先 + 子树软删 |
+
 ### 🔧 issue002 续修：多选 UI / Toast / 调试开关（task020）
 
 - **多选顶栏**：改为「已选 N」+ 四格图标按钮，避免文字挤出
@@ -70,7 +99,7 @@
 - **处理**：有 handoff 时先放行再后台校验；`debugAuth=1` 写入 localStorage 跨页；调试条 z-index 拉高
 - **手测**：先开 `/?debugAuth=1`，再登录；应进工作台且页底有 `handoff-first` 日志
 
-### 🐛 issue002 iPhone 登录后进不去（task011） ✅（待真机确认）
+### 🐛 issue002 iPhone 登录后进不去（task011） ✅ 已关闭（见 task021）
 
 - **环境**：iPhone 8 Plus · iOS 16.3.1 · 多浏览器；首页/登录可开，登录后静默进不去
 - **根因假设**：登录后进 dashboard 时 `getSession` 偶发空 → 静默踢回首页；未登录分支未结束 loading

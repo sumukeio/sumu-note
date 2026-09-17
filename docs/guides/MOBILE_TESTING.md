@@ -50,6 +50,25 @@ http://你的IP地址:3000
 
 ---
 
+## 双轨文件夹与旧机 iOS（issue002）
+
+> 完整结案说明见 [`IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`](./IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md)。
+
+| 设备 | 文件夹 UI |
+| :--- | :--- |
+| iPhone / iPod | 轻量 `LightFolderNotes`（简易编辑） |
+| 安卓 / PC / iPad | 完整 `NoteManager` |
+
+**鉴权排障（临时）**
+
+- 打开：`/?debugAuth=1`（仅当前标签页 session，**不能绕过登录**）
+- 关闭：`/?debugAuth=0` 或关闭标签页
+- 首页登录成功后点「进入工作台」（不会自动跳转）
+
+**旧机回归要点**：登录 → 工作台文件夹列表 → 进文件夹新建/保存；多选顶栏与 Toast 可见。
+
+---
+
 ## 🔧 浏览器开发者工具（桌面端模拟）
 
 ### Chrome/Edge

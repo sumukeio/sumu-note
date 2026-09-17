@@ -11,6 +11,8 @@
 
 | 日期 | 阶段 | 摘要 | 详情 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | 澄清：拆包/轻量增量动机与受众 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
+| 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task021：关闭 issue002 + 结案文档落盘 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task020：多选 UI / Toast / 调试 / select-none | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task019：轻量侧文件夹操作 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task018：issue002 双轨轻量/完整 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |

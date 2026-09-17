@@ -38,19 +38,21 @@
 
 ---
 
-## issue002 [ ] iPhone 8 Plus 登录后进不去
+## issue002 [x] iPhone 8 Plus 登录后进不去
 
 | 项 | 内容 |
 | :--- | :--- |
 | **级别** | P1 |
 | **环境** | iPhone 8 Plus · **iOS 16.3.1** · 多浏览器均复现（非单一浏览器） |
-| **期望** | 登录后进入 dashboard |
-| **实际** | 演进：静默进不去 → 登录成功后白屏转圈 → 软跳后留首页；调试条仅首页可见 |
-| **相关路径** | `AuthModal.tsx`；`useRequireAuth.tsx`；`auth-utils.ts`；`auth-login-handoff.ts`；`layout.tsx` |
-| **根因假设** | 软跳卡在路由过渡（dashboard 未挂载）；`getSession` 在 iOS 上挂死/空 |
-| **修复（task011–014 / 2026-09-17）** | 硬跳；handoff/storage 放行；根级调试；鉴权出 Suspense；**去掉 dynamic/useSearchParams 卡死** |
-| **验证** | 单测/type-check 通过；**待该机真机确认**后方可勾选 issue |
-| **待用户确认** | 绿条应有 `dashboard-home:mount` 并看到文件夹列表（不再停在「正在加载工作台」） |
+| **期望** | 登录后进入 dashboard；可进文件夹读写笔记 |
+| **实际** | 演进：静默进不去 → 登录成功后白屏转圈 → 软跳后留首页 → 工作台可用但进文件夹 import 超时 |
+| **相关路径** | `auth-login-handoff.ts`；`useRequireAuth.tsx`；`client-capability.ts`；`LightFolderNotes.tsx`；`DashboardHomeClient.tsx` |
+| **根因** | (1) WebKit 上 `getSession`/软路由/Suspense 陷阱；(2) NoteManager 大包动态加载在旧机永不完成 |
+| **修复（task011–020 / 2026-09-17）** | 硬跳+handoff；鉴权出 Suspense；禁首页自动跳；**双轨**（iPhone/iPod→`LightFolderNotes`，其余→NoteManager）；轻量侧文件夹 CRUD/多选顶栏；Toast z-index；debugAuth→sessionStorage（不能绕过登录）；chrome `select-none` |
+| **结案文档** | [`docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`](../../../docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md) |
+| **验证** | handoff / client-capability 单测；type-check；用户确认可登录进工作台并用轻量文件夹读写（2026-09-17 关闭） |
+| **Resolved At/By** | 2026-09-17 / 人类确认关单 |
+| **遗留** | 见结案指南「可选后续」：拆包≠修安卓现网；轻量已增强，增量仅按需 |
 
 ---
 

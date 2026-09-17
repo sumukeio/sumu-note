@@ -82,9 +82,14 @@
   **验证**：`tests/lib/auth-login-handoff.test.ts` + `client-capability` 通过；`npm run type-check` 通过。  
   **影响范围**：`LightFolderNotes.tsx`、`toast.tsx`、`auth-login-handoff.ts`、`AuthDebugPanel.tsx`、`DashboardHomeClient.tsx`、`NoteList.tsx`、`page.tsx`。
 
+- [x] **task021** 产出：关闭 issue002；结案说明与近期修复落盘（指南 / ISSUES / triage / CHANGELOG）。  
+  **验证**：文档交叉链接可跳转；issue002 索引与分诊均为 `[x]`。  
+  **影响范围**：`.phrase/docs/*`、`issue_triage_*`、`docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`、`docs/changelog/CHANGELOG.md`、`MOBILE_TESTING.md`、`docs/README.md`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：iPhone 验多选顶栏/新建文件夹/Toast；安卓或 PC 验完整编辑器；确认后可关 issue002。  
+- 下一建议：**思维笔记下线实施**（另开 phase，产品已 ADR）。  
+- **不要默认开**「NoteManager 拆包 / 轻量功能增量」——动机与受众见结案指南「可选后续」；无痛点/无指标则搁置。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

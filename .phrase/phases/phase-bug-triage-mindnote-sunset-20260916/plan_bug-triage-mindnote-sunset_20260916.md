@@ -17,7 +17,7 @@
 | 3 | issue006 统计页加载 | P0/P1 | 数据加载失败可见性 |
 | 4 | issue003 最近打开点击无反应 | P1 | 深链/无 folder_id 路径 |
 | 5 | issue009 移动无反应 | P1 | 交互回调 |
-| 6 | issue002 iPhone 8P | P1 | 兼容性（需复现环境） |
+| 6 | issue002 iPhone 8P | P1 | ✅ 已关（双轨+handoff，见结案指南） |
 | 7 | issue001 Toast/新建编辑页 | P2 | 移动端布局 |
 | 8 | issue007 字数非实时 | P2 | 状态订阅 |
 | 9 | issue004 自动标题上限 | P2 | 产品确认（代码现为 30） |
@@ -26,7 +26,7 @@
 ## Risks
 
 - ~~最近打开跨端预期未对齐~~ → **已拍板：云端全局**（见 `adr_product-decisions_recents-title-link_20260916.md`）。
-- 未复现环境下的 issue002/005/006 可能需用户补充机型/报错截图。
+- ~~issue002 未复现~~ → **已关**（2026-09-17）：鉴权导航 + NoteManager 大包；双轨落地，见 `docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`。
 
 ## 产品已拍板（2026-09-16，待实施）
 

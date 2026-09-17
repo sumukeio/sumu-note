@@ -12,6 +12,7 @@
 | AI/人类协作铁律与工作流 | [`../AGENTS.md`](../AGENTS.md) |
 | 当前 Phase / Task / Change | [`.phrase/docs/CHANGE.md`](../.phrase/docs/CHANGE.md) |
 | 缺陷索引 issueNNN | [`.phrase/docs/ISSUES.md`](../.phrase/docs/ISSUES.md) |
+| iOS 登录/白屏/双轨文件夹（issue002 结案） | [`guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`](./guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md) |
 | 全量变更日志（只追加） | [`changelog/CHANGELOG.md`](./changelog/CHANGELOG.md) |
 | CHANGELOG 路径兼容入口 | [`CHANGELOG.md`](./CHANGELOG.md) |
 | AI 协同认知升级手册 | [`guides/从VibeCoding到专业工程_AI协同认知升级手册.md`](./guides/从VibeCoding到专业工程_AI协同认知升级手册.md) |
@@ -59,7 +60,8 @@
 ### 📖 guides/ - 指南文档
 开发指南、测试指南和配置指南
 - `CODE_REVIEW_CHECKLIST.md` - 代码审查清单
-- `MOBILE_TESTING.md` - 移动端测试指南
+- `IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md` - **iOS WebKit 鉴权与双轨文件夹（issue002 结案）**
+- `MOBILE_TESTING.md` - 移动端测试指南（含双轨与 debugAuth）
 - `REALTIME_SYNC_SETUP.md` - 实时同步配置指南
 - `VERSION_HISTORY_AND_OFFLINE.md` - 版本历史和离线功能指南
 
