@@ -478,7 +478,7 @@ function DashboardHomeClient({ user }: { user: User }) {
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
 
       {/* 导航栏 */}
-      <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20 pt-[env(safe-area-inset-top)]">
+      <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20 pt-[env(safe-area-inset-top)] select-none">
         <div className="max-w-4xl mx-auto px-3 sm:px-4 h-14 min-h-[3.5rem] sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
           <button
             type="button"
@@ -580,7 +580,7 @@ function DashboardHomeClient({ user }: { user: User }) {
               <button
                 type="button"
                 className={cn(
-                  "text-xl sm:text-2xl font-bold flex items-center gap-2 truncate flex-1 min-w-0",
+                  "text-xl sm:text-2xl font-bold flex items-center gap-2 truncate flex-1 min-w-0 select-none",
                   "hover:text-foreground transition-colors"
                 )}
                 onClick={() => setRecentCollapsed((v) => !v)}

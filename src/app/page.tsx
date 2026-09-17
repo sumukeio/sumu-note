@@ -47,7 +47,7 @@ function LandingPageInner() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
-      <nav className="flex items-center justify-between p-6 max-w-6xl mx-auto w-full z-10">
+      <nav className="flex items-center justify-between p-6 max-w-6xl mx-auto w-full z-10 select-none">
         <div className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-600 bg-clip-text text-transparent">
           Sumu Note
         </div>

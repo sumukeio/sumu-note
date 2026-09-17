@@ -10,8 +10,8 @@ import {
 import { getAuthStorageMode } from "@/lib/supabase";
 
 /**
- * 手机排错：打开任意页加 ?debugAuth=1（写入 localStorage），根 layout 底部常驻绿条。
- * 关闭：/?debugAuth=0
+ * 手机排错：临时打开 /?debugAuth=1（仅当前标签页 session）；关闭 /?debugAuth=0。
+ * 不参与鉴权，无法绕过登录。排完障请关掉。
  */
 export default function AuthDebugPanel() {
   const [lines, setLines] = useState<string[]>([]);

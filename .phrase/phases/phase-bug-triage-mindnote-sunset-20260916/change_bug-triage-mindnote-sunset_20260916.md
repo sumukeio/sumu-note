@@ -3,6 +3,26 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task020 issue002 UI：多选顶栏 / Toast / 调试 / select-none
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `LightFolderNotes.tsx` | 顶栏四格多选；去底栏 Dock；分区标题 select-none |
+| Modify | `toast.tsx` | z-index → 10100 |
+| Modify | `auth-login-handoff.ts` + 测试 | debugAuth → sessionStorage；注释澄清非鉴权 |
+| Modify | `AuthDebugPanel.tsx` | 说明不能绕过登录 |
+| Modify | `DashboardHomeClient.tsx` / `NoteList.tsx` / `page.tsx` | chrome select-none |
+
+**验证**：auth-login-handoff 4 + client-capability 6 passed；type-check 通过。
+
+## 2026-09-17 — task019 issue002 续修：轻量侧文件夹操作
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `LightFolderNotes.tsx` | 顶栏多选操作、子文件夹多选、新建文件夹、移动/级联删除 |
+
+**验证**：type-check 通过。
+
 ## 2026-09-17 — task018 issue002 双轨：iPhone 轻量 / 其余完整
 
 | 动作 | 路径 | 说明 |

@@ -124,20 +124,39 @@ export function readAuthDebugLog(): {
   }
 }
 
-/** URL ?debugAuth=1 会写入 localStorage，之后各页都能开调试条 */
+/** URL ?debugAuth=1 仅本标签页会话启用调试条（sessionStorage，关标签即失效）。
+ *  关闭：/?debugAuth=0。不参与鉴权，不能用来绕过登录。 */
 export function isAuthDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
   try {
     const q = new URLSearchParams(window.location.search).get("debugAuth");
     if (q === "1") {
-      window.localStorage.setItem(DEBUG_FLAG_KEY, "1");
+      window.sessionStorage.setItem(DEBUG_FLAG_KEY, "1");
+      // 清掉历史 localStorage 残留，避免旧版持久开关误开
+      try {
+        window.localStorage.removeItem(DEBUG_FLAG_KEY);
+      } catch {
+        // ignore
+      }
       return true;
     }
     if (q === "0") {
-      window.localStorage.removeItem(DEBUG_FLAG_KEY);
+      window.sessionStorage.removeItem(DEBUG_FLAG_KEY);
+      try {
+        window.localStorage.removeItem(DEBUG_FLAG_KEY);
+      } catch {
+        // ignore
+      }
       return false;
     }
-    return window.localStorage.getItem(DEBUG_FLAG_KEY) === "1";
+    if (window.sessionStorage.getItem(DEBUG_FLAG_KEY) === "1") return true;
+    // 兼容：若仍残留旧 localStorage，读一次后迁到 session 并清掉长期残留
+    if (window.localStorage.getItem(DEBUG_FLAG_KEY) === "1") {
+      window.sessionStorage.setItem(DEBUG_FLAG_KEY, "1");
+      window.localStorage.removeItem(DEBUG_FLAG_KEY);
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }

@@ -75,21 +75,21 @@ type LightFolderNotesProps = {
 };
 
 function SelectionBar({
-  className,
+  count,
   children,
 }: {
-  className?: string;
+  count: number;
   children: ReactNode;
 }) {
   return (
     <div
-      className={cn(
-        "flex items-center justify-around gap-1 border rounded-lg bg-muted/40 px-1 py-1",
-        className
-      )}
+      className="select-none rounded-lg border bg-muted/50 p-2 space-y-1.5"
       data-light-selection-bar
     >
-      {children}
+      <div className="text-xs text-muted-foreground tabular-nums">
+        已选 {count}
+      </div>
+      <div className="grid grid-cols-4 gap-1">{children}</div>
     </div>
   );
 }
@@ -637,116 +637,83 @@ export default function LightFolderNotes({
     }
   };
 
-  const renderSelectionActions = (compact?: boolean) => (
+  const actionBtn =
+    "flex flex-col items-center justify-center gap-0.5 h-auto min-h-11 py-1.5 px-1 text-[10px] leading-tight whitespace-nowrap";
+
+  const renderSelectionActions = () => (
     <>
       {!showTrash && selectedNoteIds.size > 0 ? (
         <Button
           variant="ghost"
           size="sm"
-          className={cn(
-            compact && "flex-col h-auto py-1 gap-0.5",
-            "min-h-10"
-          )}
+          className={actionBtn}
           onClick={() => void handlePin()}
         >
-          <Pin className="w-4 h-4" />
-          {!compact ? <span className="ml-1">置顶</span> : (
-            <span className="text-[10px]">置顶</span>
-          )}
+          <Pin className="w-4 h-4 shrink-0" />
+          置顶
         </Button>
-      ) : null}
+      ) : (
+        <span className="min-h-11" aria-hidden />
+      )}
       {!showTrash ? (
         <Button
           variant="ghost"
           size="sm"
-          className={cn(
-            compact && "flex-col h-auto py-1 gap-0.5",
-            "min-h-10"
-          )}
+          className={actionBtn}
           onClick={() => void openMove()}
         >
-          <FolderInput className="w-4 h-4" />
-          {!compact ? <span className="ml-1">移动</span> : (
-            <span className="text-[10px]">移动</span>
-          )}
-        </Button>
-      ) : null}
-      {showTrash ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn(
-            compact && "flex-col h-auto py-1 gap-0.5",
-            "min-h-10"
-          )}
-          onClick={() => void handleTrashOrRestoreNotes()}
-          disabled={selectedNoteIds.size === 0}
-        >
-          <RotateCcw className="w-4 h-4" />
-          {!compact ? <span className="ml-1">恢复</span> : (
-            <span className="text-[10px]">恢复</span>
-          )}
+          <FolderInput className="w-4 h-4 shrink-0" />
+          移动
         </Button>
       ) : (
         <Button
           variant="ghost"
           size="sm"
-          className={cn(
-            compact && "flex-col h-auto py-1 gap-0.5",
-            "min-h-10"
-          )}
-          onClick={() => void handleDeleteSelection()}
+          className={actionBtn}
+          onClick={() => void handleTrashOrRestoreNotes()}
+          disabled={selectedNoteIds.size === 0}
         >
-          <Trash2 className="w-4 h-4" />
-          {!compact ? (
-            <span className="ml-1">
-              {selectedFolderIds.size > 0 && selectedNoteIds.size === 0
-                ? "删除"
-                : selectedFolderIds.size > 0
-                  ? "删除"
-                  : "回收站"}
-            </span>
-          ) : (
-            <span className="text-[10px]">
-              {selectedFolderIds.size > 0 ? "删除" : "回收站"}
-            </span>
-          )}
+          <RotateCcw className="w-4 h-4 shrink-0" />
+          恢复
         </Button>
       )}
       {showTrash ? (
         <Button
           variant="ghost"
           size="sm"
-          className={cn(
-            compact && "flex-col h-auto py-1 gap-0.5 text-destructive",
-            "min-h-10 text-destructive"
-          )}
+          className={cn(actionBtn, "text-destructive")}
           onClick={() => setPurgeOpen(true)}
           disabled={selectedNoteIds.size === 0}
         >
-          <Trash2 className="w-4 h-4" />
-          {!compact ? <span className="ml-1">永久删</span> : (
-            <span className="text-[10px]">永久删</span>
-          )}
+          <Trash2 className="w-4 h-4 shrink-0" />
+          永久删
         </Button>
-      ) : null}
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={actionBtn}
+          onClick={() => void handleDeleteSelection()}
+        >
+          <Trash2 className="w-4 h-4 shrink-0" />
+          {selectedFolderIds.size > 0 ? "删除" : "回收站"}
+        </Button>
+      )}
       <Button
         variant="ghost"
         size="sm"
-        className={cn(compact && "flex-col h-auto py-1 gap-0.5", "min-h-10")}
+        className={actionBtn}
         onClick={clearSelection}
       >
-        <X className="w-4 h-4" />
-        {!compact ? <span className="ml-1">取消</span> : (
-          <span className="text-[10px]">取消</span>
-        )}
+        <X className="w-4 h-4 shrink-0" />
+        取消
       </Button>
     </>
   );
 
   if (editing) {
     return (
-      <div className="flex flex-col gap-3 pb-24">
+      <div className="flex flex-col gap-3 pb-24 select-none">
         {cloudBanner ? (
           <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs flex items-center justify-between gap-2">
             <span>检测到他端已更新此笔记</span>
@@ -768,7 +735,7 @@ export default function LightFolderNotes({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="标题"
-            className="flex-1"
+            className="flex-1 select-text"
           />
           <Button
             size="icon"
@@ -799,7 +766,7 @@ export default function LightFolderNotes({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="开始书写…"
-          className="min-h-[50vh] w-full rounded-md border border-border bg-background p-3 text-sm leading-relaxed resize-y"
+          className="min-h-[50vh] w-full rounded-md border border-border bg-background p-3 text-sm leading-relaxed resize-y select-text"
         />
         <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
           <DialogContent>
@@ -842,7 +809,7 @@ export default function LightFolderNotes({
   }
 
   return (
-    <div className="flex flex-col gap-3 pb-32">
+    <div className="flex flex-col gap-3 pb-8 select-none">
       <div className="flex items-center gap-1.5 flex-wrap">
         <Button
           variant="ghost"
@@ -918,14 +885,11 @@ export default function LightFolderNotes({
 
       {/* 顶栏操作条：不被底部调试绿条挡住 */}
       {isSelectionMode ? (
-        <SelectionBar>
-          <span className="text-xs text-muted-foreground px-2 shrink-0">
-            已选 {selectionCount}
-          </span>
-          {renderSelectionActions(false)}
+        <SelectionBar count={selectionCount}>
+          {renderSelectionActions()}
         </SelectionBar>
       ) : (
-        <p className="text-[11px] text-muted-foreground px-0.5">
+        <p className="text-[11px] text-muted-foreground px-0.5 select-none">
           长按笔记/文件夹进入多选；或点右上角多选图标
         </p>
       )}
@@ -952,7 +916,7 @@ export default function LightFolderNotes({
         <>
           {!showTrash && subFolders.length > 0 ? (
             <section>
-              <p className="text-xs text-muted-foreground mb-2">子文件夹</p>
+              <p className="text-xs text-muted-foreground mb-2 select-none">子文件夹</p>
               <ul className="space-y-1">
                 {subFolders.map((f) => {
                   const selected = selectedFolderIds.has(f.id);
@@ -1001,7 +965,7 @@ export default function LightFolderNotes({
           ) : null}
 
           <section>
-            <p className="text-xs text-muted-foreground mb-2">
+            <p className="text-xs text-muted-foreground mb-2 select-none">
               {showTrash ? "回收站" : "笔记"}（{notes.length}）
             </p>
             {notes.length === 0 ? (
@@ -1068,15 +1032,7 @@ export default function LightFolderNotes({
         </>
       )}
 
-      {/* 底栏 Dock：z 高于调试条，避免被挡住 */}
-      {isSelectionMode ? (
-        <div
-          className="fixed bottom-0 left-0 right-0 z-[10050] border-t-2 border-primary/40 bg-background px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around gap-1 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]"
-          data-light-dock
-        >
-          {renderSelectionActions(true)}
-        </div>
-      ) : null}
+      {/* 底栏 Dock 已去掉：避免挡住 Toast；操作统一用顶栏 */}
 
       <MoveToFolderDialog
         open={moveOpen}

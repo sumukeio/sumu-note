@@ -33,13 +33,16 @@ describe("auth-login-handoff (issue002)", () => {
     expect(peekAuthHandoff()?.userId).toBe("u-2");
   });
 
-  it("debugAuth=1 持久化；dashboardUrl 不带参（避免 iOS Suspense）", () => {
+  it("debugAuth=1 写入 sessionStorage；dashboardUrl 不带参", () => {
     window.history.replaceState({}, "", "/?debugAuth=1");
     expect(isAuthDebugEnabled()).toBe(true);
-    expect(localStorage.getItem("sumu:debugAuth")).toBe("1");
+    expect(sessionStorage.getItem("sumu:debugAuth")).toBe("1");
+    expect(localStorage.getItem("sumu:debugAuth")).toBeNull();
     window.history.replaceState({}, "", "/");
     expect(isAuthDebugEnabled()).toBe(true);
     expect(dashboardUrlWithDebug()).toBe("/dashboard");
+    window.history.replaceState({}, "", "/?debugAuth=0");
+    expect(isAuthDebugEnabled()).toBe(false);
   });
 
   it("调试日志写入 localStorage", () => {

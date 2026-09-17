@@ -16,8 +16,8 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      // issue001：移动端也贴底，避免挡住编辑页标题/顶栏
-      "fixed bottom-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 right-0 top-auto sm:flex-col md:max-w-[420px]",
+      // issue001：移动端也贴底；z 高于轻量 Dock（曾 10050），避免操作反馈被挡
+      "fixed bottom-0 z-[10100] flex max-h-screen w-full flex-col-reverse p-4 right-0 top-auto sm:flex-col md:max-w-[420px]",
       className
     )}
     {...props}

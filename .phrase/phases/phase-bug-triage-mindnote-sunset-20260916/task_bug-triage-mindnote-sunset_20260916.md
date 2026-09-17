@@ -78,9 +78,13 @@
   **验证**：`npm run type-check` 通过。  
   **影响范围**：`LightFolderNotes.tsx`。
 
+- [x] **task020** 产出：多选顶栏不挤字、Toast 不被挡、debugAuth 默认关且不能绕过登录、chrome `select-none`。  
+  **验证**：`tests/lib/auth-login-handoff.test.ts` + `client-capability` 通过；`npm run type-check` 通过。  
+  **影响范围**：`LightFolderNotes.tsx`、`toast.tsx`、`auth-login-handoff.ts`、`AuthDebugPanel.tsx`、`DashboardHomeClient.tsx`、`NoteList.tsx`、`page.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：iPhone 验新建文件夹/多选 Dock/子文件夹删除移动；安卓或 PC 验完整编辑器。  
+- 下一建议：iPhone 验多选顶栏/新建文件夹/Toast；安卓或 PC 验完整编辑器；确认后可关 issue002。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

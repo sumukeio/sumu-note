@@ -402,7 +402,7 @@ export function NoteList({
       >
         <header
           data-note-list-header
-          className="shrink-0 bg-background/80 backdrop-blur z-10 border-b border-border/40"
+          className="shrink-0 bg-background/80 backdrop-blur z-10 border-b border-border/40 select-none"
         >
           <div className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -676,7 +676,7 @@ export function NoteList({
 
         <div
           className={cn(
-            "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300",
+            "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300 select-none",
             "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]",
             isSelectionMode && selectionDockVisible
               ? "translate-y-0 opacity-100"
