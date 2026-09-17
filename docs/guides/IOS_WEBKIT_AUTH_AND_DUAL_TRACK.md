@@ -19,7 +19,7 @@
 ## 修复链路（task011–020）
 
 1. **登录放行**：`auth-login-handoff`（session+local 双写）→ 硬跳 `/dashboard`；`getSession` 短重试。
-2. **鉴权壳**：鉴权移出 Suspense；去掉易卡死的 dynamic/`useSearchParams` 深链依赖；首页禁止自动跳（手动「进入工作台」）。
+2. **鉴权壳**：鉴权移出 Suspense；去掉易卡死的 dynamic/`useSearchParams` 深链依赖；已登录访问首页则硬跳 `/dashboard`（已去掉「进入工作台」按钮）。
 3. **双轨文件夹**（`shouldUseLightFolderNotes`）：
    - **iPhone / iPod** → 增强轻量 `LightFolderNotes`（列表/新建/textarea 编辑、置顶、回收站、移动、子文件夹多选、顶栏多选操作、简化版本历史/缓存）。
    - **安卓 / PC / iPad** → 完整 `NoteManager`（动态加载）。
@@ -36,7 +36,7 @@
 
 **iPhone（轻量）**
 
-- [ ] 登录 → 首页点「进入工作台」→ 见文件夹列表
+- [ ] 登录成功硬跳工作台；已登录再开首页也会硬跳进工作台
 - [ ] 进文件夹：可新建笔记/文件夹、打开编辑、保存有 Toast
 - [ ] 多选：顶栏「已选 N」+ 图标操作；Toast 不被挡
 - [ ] 默认无调试绿条；临时 `/?debugAuth=1` 可见，关标签后消失

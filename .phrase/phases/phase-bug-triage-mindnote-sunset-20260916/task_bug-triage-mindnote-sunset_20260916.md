@@ -86,6 +86,10 @@
   **验证**：文档交叉链接可跳转；issue002 索引与分诊均为 `[x]`。  
   **影响范围**：`.phrase/docs/*`、`issue_triage_*`、`docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`、`docs/changelog/CHANGELOG.md`、`MOBILE_TESTING.md`、`docs/README.md`。
 
+- [x] **task022** 产出：砍掉首页「进入工作台」；已登录访问 `/` 硬跳 `/dashboard`。  
+  **验证**：`npm run type-check` 通过。  
+  **影响范围**：`src/app/page.tsx`、结案指南、MOBILE_TESTING、CHANGELOG。
+
 ## 未开启（待人类确认下一 task）
 
 - 下一建议：**思维笔记下线实施**（另开 phase，产品已 ADR）。  
