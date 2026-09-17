@@ -17,6 +17,11 @@ import { detectTableAtCursor, tableDataToMarkdown, htmlTableToMarkdown } from "@
 import { getNoteTableLayout, upsertNoteTableLayout } from "@/lib/note-service";
 import { cn } from "@/lib/utils";
 import FloatingToolbar from "@/components/FloatingToolbar";
+import {
+  extractTokenAtCursor,
+  isSmartLinkToken,
+  shouldOpenLinkConfirmOnEditClick,
+} from "@/lib/editor-link-gesture";
 
 interface SegmentedEditorProps {
   content: string;
@@ -68,6 +73,8 @@ export default function SegmentedEditor({
   const flushScheduledRef = useRef(false);
   const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
   const [pendingLinkToken, setPendingLinkToken] = useState<string | null>(null);
+  /** 最近一次指针类型，用于区分触摸误触与桌面修饰键点击 */
+  const lastPointerTypeRef = useRef<string>("mouse");
 
   // 粘贴表格确认：命中「表格判定规则」时弹窗，由用户选择是否以表格形式粘贴
   const [pasteConfirmOpen, setPasteConfirmOpen] = useState(false);
@@ -151,37 +158,6 @@ export default function SegmentedEditor({
     const next = safe.slice(0, colCount);
     while (next.length < colCount) next.push(160);
     return next;
-  }, []);
-
-  const extractTokenAtCursor = useCallback((text: string, cursor: number) => {
-    if (!text) return "";
-    // 分隔符：空白、括号、引号、逗号、中文标点等
-    // 注意：保留 URL 常见字符（:/?&=#.%_-）不要作为分隔符
-    const isBoundary = (ch: string) =>
-      /\s/.test(ch) ||
-      ch === "(" ||
-      ch === ")" ||
-      ch === "[" ||
-      ch === "]" ||
-      ch === "{" ||
-      ch === "}" ||
-      ch === '"' ||
-      ch === "'" ||
-      ch === "<" ||
-      ch === ">" ||
-      ch === "," ||
-      ch === "，" ||
-      ch === "。" ||
-      ch === "！" ||
-      ch === "？" ||
-      ch === "；" ||
-      ch === "：" ||
-      ch === "、";
-    let l = cursor;
-    let r = cursor;
-    while (l > 0 && !isBoundary(text[l - 1])) l--;
-    while (r < text.length && !isBoundary(text[r])) r++;
-    return text.slice(l, r);
   }, []);
 
   const openSmartLink = useCallback((raw: string) => {
@@ -1620,17 +1596,33 @@ export default function SegmentedEditor({
                   });
                 }
               }}
+              onPointerDown={(e) => {
+                lastPointerTypeRef.current = e.pointerType || "mouse";
+              }}
               onClick={(e) => {
-                // 编辑态“智能识别链接”：单击命中链接时弹出应用内部确认弹窗
+                // issue008：编辑态普通单击只落光标；桌面需 Cmd/Ctrl+点击才确认打开
+                if (
+                  !shouldOpenLinkConfirmOnEditClick({
+                    metaKey: e.metaKey,
+                    ctrlKey: e.ctrlKey,
+                    pointerType: lastPointerTypeRef.current,
+                  })
+                ) {
+                  return;
+                }
                 const cursor = e.currentTarget.selectionStart ?? 0;
                 const token = extractTokenAtCursor(e.currentTarget.value, cursor);
-                // 仅当命中“看起来像链接”的 token 时才弹窗
-                if (
-                  /^https?:\/\/\S+$/i.test(token.trim()) ||
-                  /^\[\[([^\]|]+)(\|[^\]]+)?\]\]$/.test(token.trim())
-                ) {
+                if (isSmartLinkToken(token)) {
                   confirmAndOpenSmartLink(token);
                 }
+              }}
+              onContextMenu={(e) => {
+                // 移动端长按 / 桌面右键：若落在链接上则弹出打开确认（显式入口）
+                const cursor = e.currentTarget.selectionStart ?? 0;
+                const token = extractTokenAtCursor(e.currentTarget.value, cursor);
+                if (!isSmartLinkToken(token)) return;
+                e.preventDefault();
+                confirmAndOpenSmartLink(token);
               }}
               placeholder={segmentIndex === 0 ? placeholder : undefined}
               className={cn("w-full min-h-[120px] resize-none overflow-hidden", textareaClassName)}
@@ -1670,7 +1662,8 @@ export default function SegmentedEditor({
           <DialogHeader>
             <DialogTitle>打开链接</DialogTitle>
             <DialogDescription>
-              是否跳转在新页面打开下面的链接？
+              编辑态需主动确认后才会打开，避免误触。
+              桌面可用 Cmd/Ctrl+点击；手机可长按链接。
             </DialogDescription>
           </DialogHeader>
           <div className="mt-2 rounded-md bg-muted px-3 py-2 text-xs break-all">

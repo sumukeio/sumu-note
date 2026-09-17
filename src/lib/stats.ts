@@ -1,7 +1,6 @@
 "use client";
 
 import { supabase } from "./supabase";
-import { getNotesForUser } from "./note-service";
 import {
   eachDayOfInterval,
   format,
@@ -40,7 +39,7 @@ export interface FolderDistributionItem {
   folderId: string | null;
   folderName: string;
   count: number;
-  [key: string]: any; // 添加索引签名以兼容 recharts 的 ChartDataInput 类型
+  [key: string]: string | number | null;
 }
 
 export interface RecentNote {
@@ -57,61 +56,65 @@ export interface DashboardStats {
   recentNotes: RecentNote[];
 }
 
-// --- 工具函数 ---
-
-// 粗略去掉 Markdown 标记，便于统计纯文本长度
-const stripMarkdown = (markdown: string | null): string => {
+/** 粗略去掉 Markdown 标记，便于统计纯文本长度 */
+export function stripMarkdown(markdown: string | null): string {
   if (!markdown) return "";
   return markdown
-    .replace(/`{1,3}[^`]*`{1,3}/g, "") // 行内/块代码
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // 图片
-    .replace(/\[[^\]]*\]\([^)]*\)/g, "") // 链接
-    .replace(/[#>*_~\-]+/g, " ") // 标题、引用、列表符号
-    .replace(/(\r\n|\n|\r)/g, " "); // 换行
-};
+    .replace(/`{1,3}[^`]*`{1,3}/g, "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/[#>*_~\-]+/g, " ")
+    .replace(/(\r\n|\n|\r)/g, " ");
+}
 
-const toDateKey = (value: string | null): string | null => {
+export function toDateKey(value: string | null): string | null {
   if (!value) return null;
   const d = new Date(value);
   if (isNaN(d.getTime())) return null;
   return format(d, "yyyy-MM-dd");
-};
+}
 
 async function fetchBaseData(userId: string): Promise<{
   notes: NoteRow[];
   folders: FolderRow[];
 }> {
-  const [notes, foldersRes] = await Promise.all([
-    getNotesForUser(userId),
+  const [notesRes, foldersRes] = await Promise.all([
+    supabase
+      .from("notes")
+      .select("id, title, content, folder_id, updated_at")
+      .eq("user_id", userId)
+      .or("is_deleted.eq.false,is_deleted.is.null")
+      .order("updated_at", { ascending: false }),
     supabase.from("folders").select("id, name").eq("user_id", userId),
   ]);
 
+  if (notesRes.error) {
+    throw new Error(notesRes.error.message || "获取笔记失败");
+  }
   if (foldersRes.error) {
-    throw new Error(foldersRes.error.message || "Failed to fetch folders");
+    throw new Error(foldersRes.error.message || "获取文件夹失败");
   }
 
   return {
-    notes: notes as NoteRow[],
+    notes: (notesRes.data || []) as NoteRow[],
     folders: (foldersRes.data || []) as FolderRow[],
   };
 }
 
-// --- 导出的统计函数 ---
-
-export async function getUserStats(userId: string): Promise<UserStats> {
-  const { notes } = await fetchBaseData(userId);
-
-  const now = new Date();
+/** 纯函数：汇总卡片指标（issue006 回归） */
+export function computeUserStats(
+  notes: NoteRow[],
+  now: Date = new Date()
+): UserStats {
   const startOfToday = startOfDay(now);
-  const weekStart = subDays(startOfToday, 6); // 包含今天在内的过去 7 天
+  const weekStart = subDays(startOfToday, 6);
 
   let totalChars = 0;
   let notesThisWeek = 0;
   const activeDaySet = new Set<string>();
 
   for (const note of notes) {
-    const text = stripMarkdown(note.content);
-    totalChars += text.length;
+    totalChars += stripMarkdown(note.content).length;
 
     const updatedKey = toDateKey(note.updated_at);
     if (updatedKey) {
@@ -134,91 +137,80 @@ export async function getUserStats(userId: string): Promise<UserStats> {
   };
 }
 
-export async function getUserHeatmapData(userId: string): Promise<HeatmapDay[]> {
-  const { notes } = await fetchBaseData(userId);
-
-  const today = startOfDay(new Date());
+/** 纯函数：一年热力图 */
+export function computeHeatmap(
+  notes: NoteRow[],
+  now: Date = new Date()
+): HeatmapDay[] {
+  const today = startOfDay(now);
   const oneYearAgo = subDays(today, 364);
-
   const dayMap = new Map<string, number>();
 
   for (const note of notes) {
     const key = toDateKey(note.updated_at);
     if (!key) continue;
-    const dateObj = new Date(key);
-    if (dateObj < oneYearAgo || dateObj > today) continue;
-
-    const current = dayMap.get(key) || 0;
-    // 使用字数作为热力值
-    const text = stripMarkdown(note.content);
-    dayMap.set(key, current + text.length);
+    const startKey = format(oneYearAgo, "yyyy-MM-dd");
+    const endKey = format(today, "yyyy-MM-dd");
+    if (key < startKey || key > endKey) continue;
+    dayMap.set(
+      key,
+      (dayMap.get(key) || 0) + stripMarkdown(note.content).length
+    );
   }
 
   const days = eachDayOfInterval({ start: oneYearAgo, end: today });
-
   const raw: HeatmapDay[] = days.map((d) => {
     const key = format(d, "yyyy-MM-dd");
-    const count = dayMap.get(key) || 0;
-    return { date: key, count, intensity: 0 };
+    return { date: key, count: dayMap.get(key) || 0, intensity: 0 };
   });
 
   const max = raw.reduce((acc, d) => (d.count > acc ? d.count : acc), 0);
-  if (max === 0) {
-    // 全部为空，直接返回 count 为 0，intensity 为 0 的数组
-    return raw;
-  }
+  if (max === 0) return raw;
 
-  // 将 count 映射到 0-4 的等级
-  const result = raw.map((d) => {
+  return raw.map((d) => {
+    if (d.count === 0) return { ...d, intensity: 0 };
     const ratio = d.count / max;
-    let level = 0;
-    if (ratio > 0 && ratio <= 0.25) level = 1;
+    let level = 1;
+    if (ratio <= 0.25) level = 1;
     else if (ratio <= 0.5) level = 2;
     else if (ratio <= 0.75) level = 3;
-    else if (ratio > 0.75) level = 4;
+    else level = 4;
     return { ...d, intensity: level };
   });
-
-  return result;
 }
 
-export async function getFolderDistribution(
-  userId: string
-): Promise<FolderDistributionItem[]> {
-  const { notes, folders } = await fetchBaseData(userId);
-
+/** 纯函数：文件夹分布 */
+export function computeFolderDistribution(
+  notes: NoteRow[],
+  folders: FolderRow[]
+): FolderDistributionItem[] {
   const folderNameMap = new Map<string, string>();
   folders.forEach((f) => folderNameMap.set(f.id, f.name));
 
   const counter = new Map<string | null, number>();
-
   for (const note of notes) {
     const key = note.folder_id ?? null;
     counter.set(key, (counter.get(key) || 0) + 1);
   }
 
   const items: FolderDistributionItem[] = [];
-
   counter.forEach((count, folderId) => {
-    const name =
-      (folderId && folderNameMap.get(folderId)) || "未分组";
     items.push({
       folderId,
-      folderName: name,
+      folderName: (folderId && folderNameMap.get(folderId)) || "未分组",
       count,
     });
   });
-
-  // 按数量降序排序
   items.sort((a, b) => b.count - a.count);
   return items;
 }
 
-export async function getRecentNotes(
-  userId: string,
+/** 纯函数：最近编辑 */
+export function computeRecentNotes(
+  notes: NoteRow[],
+  folders: FolderRow[],
   limit = 8
-): Promise<RecentNote[]> {
-  const { notes, folders } = await fetchBaseData(userId);
+): RecentNote[] {
   const folderNameMap = new Map<string, string>();
   folders.forEach((f) => folderNameMap.set(f.id, f.name));
 
@@ -236,25 +228,51 @@ export async function getRecentNotes(
   }));
 }
 
-export async function getDashboardStats(
-  userId: string
-): Promise<DashboardStats> {
-  const [userStats, heatmap, folderDistribution, recentNotes] =
-    await Promise.all([
-      getUserStats(userId),
-      getUserHeatmapData(userId),
-      getFolderDistribution(userId),
-      getRecentNotes(userId),
-    ]);
-
+/** 由已拉取数据组装仪表盘（单次 IO） */
+export function buildDashboardStats(
+  notes: NoteRow[],
+  folders: FolderRow[],
+  now: Date = new Date()
+): DashboardStats {
   return {
-    userStats,
-    heatmap,
-    folderDistribution,
-    recentNotes,
+    userStats: computeUserStats(notes, now),
+    heatmap: computeHeatmap(notes, now),
+    folderDistribution: computeFolderDistribution(notes, folders),
+    recentNotes: computeRecentNotes(notes, folders),
   };
 }
 
+export async function getUserStats(userId: string): Promise<UserStats> {
+  const { notes } = await fetchBaseData(userId);
+  return computeUserStats(notes);
+}
 
+export async function getUserHeatmapData(userId: string): Promise<HeatmapDay[]> {
+  const { notes } = await fetchBaseData(userId);
+  return computeHeatmap(notes);
+}
 
+export async function getFolderDistribution(
+  userId: string
+): Promise<FolderDistributionItem[]> {
+  const { notes, folders } = await fetchBaseData(userId);
+  return computeFolderDistribution(notes, folders);
+}
 
+export async function getRecentNotes(
+  userId: string,
+  limit = 8
+): Promise<RecentNote[]> {
+  const { notes, folders } = await fetchBaseData(userId);
+  return computeRecentNotes(notes, folders, limit);
+}
+
+/**
+ * 仪表盘聚合：只拉取一次笔记/文件夹（issue006：避免 4 次全量并行拖垮页面）
+ */
+export async function getDashboardStats(
+  userId: string
+): Promise<DashboardStats> {
+  const { notes, folders } = await fetchBaseData(userId);
+  return buildDashboardStats(notes, folders);
+}

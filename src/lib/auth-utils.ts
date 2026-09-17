@@ -1,5 +1,6 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, handleAuthError } from "@/lib/supabase";
+import { withRetries } from "@/lib/auth-session-resilience";
 
 const AUTH_TIMEOUT_CODE = "AUTH_TIMEOUT";
 
@@ -26,24 +27,39 @@ function validateSessionInBackground(): void {
 
 /**
  * 优先读本地 session（快），无 session 时再带超时调用 getUser。
+ * iOS 上登录后立刻读 session 偶发为空，故对 getSession 做短重试（issue002）。
  */
 export async function resolveAuthUser(options?: {
   timeoutMs?: number;
 }): Promise<ResolveAuthResult> {
   const timeoutMs = options?.timeoutMs ?? 12_000;
 
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
+  const sessionResult = await withRetries(
+    async () => {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      return { session, sessionError };
+    },
+    {
+      attempts: 6,
+      delayMs: 120,
+      shouldRetry: ({ session, sessionError }) =>
+        !session?.user && !sessionError,
+    }
+  );
 
-  if (sessionError && (await handleAuthError(sessionError))) {
+  if (
+    sessionResult.sessionError &&
+    (await handleAuthError(sessionResult.sessionError))
+  ) {
     return { status: "unauthenticated" };
   }
 
-  if (session?.user) {
+  if (sessionResult.session?.user) {
     validateSessionInBackground();
-    return { status: "ok", user: session.user };
+    return { status: "ok", user: sessionResult.session.user };
   }
 
   try {
@@ -81,7 +97,7 @@ export async function resolveAuthUser(options?: {
  * 密码登录后等待 session 写入本地存储（老设备 Safari 上可能略慢）。
  */
 export async function ensureSessionAfterSignIn(
-  maxWaitMs = 3000
+  maxWaitMs = 5000
 ): Promise<Session | null> {
   const { data } = await supabase.auth.getSession();
   if (data.session) return data.session;
@@ -105,8 +121,8 @@ export async function ensureSessionAfterSignIn(
     });
 
     const poll = async () => {
-      for (let i = 0; i < 10 && !settled; i++) {
-        await new Promise((r) => setTimeout(r, 80));
+      for (let i = 0; i < 20 && !settled; i++) {
+        await new Promise((r) => setTimeout(r, 100));
         const { data: next } = await supabase.auth.getSession();
         if (next.session) {
           finish(next.session);

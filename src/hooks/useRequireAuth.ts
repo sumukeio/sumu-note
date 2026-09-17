@@ -24,7 +24,10 @@ export function useRequireAuth() {
     }
 
     if (result.status === "unauthenticated") {
-      router.replace("/");
+      setUser(null);
+      setLoading(false);
+      // 带回标记，落地页可提示并打开登录（避免「进不去又不报错」）
+      router.replace("/?auth=required");
       return;
     }
 

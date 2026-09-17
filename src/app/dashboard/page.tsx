@@ -7,7 +7,11 @@ import { supabase } from "@/lib/supabase";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import { getNoteFolderId, getFolderAncestorStack, searchNotes } from "@/lib/note-service";
-import { getRecentNotes, type RecentNoteEntry } from "@/lib/recent-notes";
+import {
+  getLocalRecentNotes,
+  syncRecentNotes,
+  type RecentNoteEntry,
+} from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
 import NoteManager from "@/components/NoteManager";
 import FolderManager from "@/components/FolderManager"; // 引入
@@ -15,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogOut, Loader2, Download, Search } from "lucide-react";
 import ExportDialog from "@/components/ExportDialog";
+import { useToast } from "@/components/ui/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -65,7 +70,10 @@ function DashboardPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading, authError, retry } = useRequireAuth();
+  const { toast } = useToast();
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [openingRecent, setOpeningRecent] = useState(false);
+  const openingRecentRef = useRef(false);
 
   // 🔥 状态：当前查看的文件夹 (null 代表看根目录文件夹列表)
   const [currentFolder, setCurrentFolder] = useState<{id: string, name: string} | null>(null);
@@ -91,12 +99,76 @@ function DashboardPageContent() {
     currentFolder: null,
   });
 
-  // 最近打开：本地读取（仅用于 dashboard 展示）
+  // 最近打开：云端同步 + 本地缓存（issue003）
   useEffect(() => {
     if (!user?.id) return;
-    setRecentNotes(getRecentNotes(user.id));
+    setRecentNotes(getLocalRecentNotes(user.id));
+    let cancelled = false;
+    syncRecentNotes(user.id)
+      .then((list) => {
+        if (!cancelled) setRecentNotes(list);
+      })
+      .catch(() => {
+        // 已降级本地
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
+  /** 直接按状态打开笔记（避免 URL 竞态导致手机端「点了没反应」） */
+  const openNoteById = useCallback(
+    async (noteId: string) => {
+      if (!user?.id || !noteId || openingRecentRef.current) return;
+      openingRecentRef.current = true;
+      setOpeningRecent(true);
+      try {
+        const folderIdFromNote = await getNoteFolderId(noteId, user.id);
+        if (!folderIdFromNote) {
+          toast({
+            title: "无法打开",
+            description: "该笔记未关联文件夹，请从文件夹列表进入。",
+            variant: "destructive",
+          });
+          return;
+        }
+        const [{ data: folderData, error: folderError }, ancestorStack] =
+          await Promise.all([
+            supabase
+              .from("folders")
+              .select("id, name")
+              .eq("id", folderIdFromNote)
+              .eq("user_id", user.id)
+              .single(),
+            getFolderAncestorStack(folderIdFromNote, user.id),
+          ]);
+        if (folderError || !folderData) {
+          toast({
+            title: "无法打开",
+            description: folderError?.message || "找不到笔记所在文件夹",
+            variant: "destructive",
+          });
+          return;
+        }
+        setSearchQuery("");
+        setFolderStack(ancestorStack);
+        setCurrentFolder({ id: folderData.id, name: folderData.name });
+        // 强制刷新 initialNoteId（同笔记再次点击也能打开）
+        setInitialNoteId(null);
+        requestAnimationFrame(() => setInitialNoteId(noteId));
+      } catch (err: unknown) {
+        toast({
+          title: "打开失败",
+          description: (err as Error)?.message || "请稍后重试",
+          variant: "destructive",
+        });
+      } finally {
+        openingRecentRef.current = false;
+        setOpeningRecent(false);
+      }
+    },
+    [user?.id, toast]
+  );
   // 最近打开：折叠状态（默认折叠，持久化到本地）
   useEffect(() => {
     if (!user?.id) return;
@@ -134,7 +206,7 @@ function DashboardPageContent() {
     router.prefetch("/dashboard/settings");
 
     // 最近打开的笔记详情页（最多 8 个）
-    const recents = getRecentNotes(user.id).slice(0, 8);
+    const recents = getLocalRecentNotes(user.id).slice(0, 8);
     for (const n of recents) {
       router.prefetch(`/notes/${n.noteId}`);
     }
@@ -161,50 +233,16 @@ function DashboardPageContent() {
     if (processedParamsRef.current === currentParams) return;
     
     if (noteId) {
-      processedParamsRef.current = currentParams; // 标记为已处理
-      
-      if (folderId) {
-        // 有 folderId，获取文件夹信息并构建 folderStack（用于侧滑返回上一级）
-        Promise.all([
-          supabase.from('folders').select('id, name').eq('id', folderId).eq('user_id', user.id).single(),
-          getFolderAncestorStack(folderId, user.id),
-        ]).then(([{ data, error }, ancestorStack]) => {
-          if (!error && data) {
-            setFolderStack(ancestorStack);
-            setCurrentFolder({ id: data.id, name: data.name });
-            setInitialNoteId(noteId);
-            setSearchQuery("");
-            setTimeout(() => router.replace('/dashboard', { scroll: false }), 500);
-          } else {
-            processedParamsRef.current = "";
-          }
-        });
-      } else {
-        // 没有 folderId，先查询笔记的 folder_id
-        getNoteFolderId(noteId, user.id).then((folderIdFromNote) => {
-          if (folderIdFromNote) {
-            Promise.all([
-              supabase.from('folders').select('id, name').eq('id', folderIdFromNote).eq('user_id', user.id).single(),
-              getFolderAncestorStack(folderIdFromNote, user.id),
-            ]).then(([{ data: folderData, error: folderError }, ancestorStack]) => {
-              if (!folderError && folderData) {
-                setFolderStack(ancestorStack);
-                setCurrentFolder({ id: folderData.id, name: folderData.name });
-                setInitialNoteId(noteId);
-                setSearchQuery("");
-                setTimeout(() => router.replace('/dashboard', { scroll: false }), 500);
-              } else {
-                processedParamsRef.current = "";
-              }
-            });
-          } else {
-            console.warn('Note has no folder_id, cannot open directly');
-            processedParamsRef.current = "";
-          }
-        }).catch(() => {
+      processedParamsRef.current = currentParams;
+      // 统一走 openNoteById：以 DB 中的 folder_id 为准，忽略陈旧 folder 参数
+      void (async () => {
+        try {
+          await openNoteById(noteId);
+          setTimeout(() => router.replace("/dashboard", { scroll: false }), 300);
+        } catch {
           processedParamsRef.current = "";
-        });
-      }
+        }
+      })();
     } else if (searchParam) {
       // 只有搜索参数，设置到搜索框
       processedParamsRef.current = currentParams;
@@ -214,7 +252,7 @@ function DashboardPageContent() {
         router.replace('/dashboard', { scroll: false });
       }, 300);
     }
-  }, [user?.id, loading, searchParams, router]);
+  }, [user?.id, loading, searchParams, router, openNoteById]);
 
   const handleSignOut = async () => {
     setLogoutConfirmOpen(false);
@@ -566,8 +604,11 @@ function DashboardPageContent() {
                   variant="ghost"
                   size="sm"
                   className="h-8 px-2 text-xs"
-                  onClick={() => setRecentNotes(getRecentNotes(user?.id || ""))}
-                  title="刷新"
+                  onClick={() => {
+                    if (!user?.id) return;
+                    void syncRecentNotes(user.id).then(setRecentNotes);
+                  }}
+                  title="从云端刷新"
                 >
                   刷新
                 </Button>
@@ -579,12 +620,10 @@ function DashboardPageContent() {
                   <button
                     key={n.noteId}
                     type="button"
-                    className="text-left rounded-lg border border-border bg-card/60 hover:bg-accent/60 transition-colors px-3 py-2"
+                    disabled={openingRecent}
+                    className="text-left rounded-lg border border-border bg-card/60 hover:bg-accent/60 transition-colors px-3 py-2 disabled:opacity-60 touch-manipulation min-h-11"
                     onClick={() => {
-                      const params = new URLSearchParams();
-                      params.set("note", n.noteId);
-                      if (n.folderId) params.set("folder", n.folderId);
-                      router.push(`/dashboard?${params.toString()}`);
+                      void openNoteById(n.noteId);
                     }}
                   >
                     <div className="font-medium truncate">{n.title || "无标题"}</div>
@@ -675,7 +714,8 @@ function DashboardPageContent() {
                   }
                   setCurrentFolder({ id, name });
                 }}
-                initialNoteId={initialNoteId} // 传入初始笔记 ID，自动打开编辑模式
+                initialNoteId={initialNoteId}
+                onInitialNoteOpened={() => setInitialNoteId(null)}
             />
         ) : (
             // 👀 模式 A: 查看文件夹列表 (默认)

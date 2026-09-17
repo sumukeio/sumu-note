@@ -35,6 +35,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
+import { isSelectionSafeOverlayTarget } from "@/lib/ui-event-guards";
 import type { Note, FolderItem } from "@/types/note";
 
 export type { FolderItem };
@@ -279,6 +280,8 @@ export interface NoteListProps {
   onPin: () => void;
   onCopy: () => void;
   sensors: ReturnType<typeof useSensors>;
+  /** 移动弹窗打开时隐藏 Dock，避免挡弹窗/抢点击 */
+  selectionDockVisible?: boolean;
 }
 
 export function NoteList({
@@ -317,6 +320,7 @@ export function NoteList({
   onPin,
   onCopy,
   sensors,
+  selectionDockVisible = true,
 }: NoteListProps) {
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [newMenuFromFab, setNewMenuFromFab] = useState(false);
@@ -330,10 +334,12 @@ export function NoteList({
 
     const shouldIgnore = (target: HTMLElement | null) => {
       if (!target) return true;
+      // 任意 Dialog 打开期间不取消选中（防移动弹窗 mousedown 清选中）
+      if (document.querySelector('[data-slot="dialog-content"]')) return true;
+      if (isSelectionSafeOverlayTarget(target)) return true;
       return !!(
         target.closest("[data-note-card]") ||
         target.closest("[data-subfolder-card]") ||
-        target.closest("[data-selection-dock]") ||
         target.closest("[data-note-list-header]")
       );
     };
@@ -384,9 +390,9 @@ export function NoteList({
           // 需求：选中后点击“旁边空白处”也能取消选中
           // 规则：只要点击不在卡片内、也不在 Dock / 顶部工具栏内，就退出选择模式
           if (
+            isSelectionSafeOverlayTarget(target) ||
             target.closest("[data-note-card]") ||
             target.closest("[data-subfolder-card]") ||
-            target.closest("[data-selection-dock]") ||
             target.closest("[data-note-list-header]")
           ) {
             return;
@@ -672,7 +678,7 @@ export function NoteList({
           className={cn(
             "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300",
             "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]",
-            isSelectionMode
+            isSelectionMode && selectionDockVisible
               ? "translate-y-0 opacity-100"
               : "translate-y-20 opacity-0 pointer-events-none"
           )}

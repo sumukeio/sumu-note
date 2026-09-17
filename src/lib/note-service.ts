@@ -2,8 +2,10 @@
 
 import { supabase } from "./supabase";
 import type { Note, NoteCreate, NoteUpdate } from "@/types/note";
+import { isNotePubliclyReadable } from "./note-publish";
 
 export type { Note, NoteCreate, NoteUpdate } from "@/types/note";
+export { isNotePubliclyReadable } from "./note-publish";
 
 export interface NoteTableLayout {
   id: string;
@@ -207,6 +209,31 @@ export async function getNoteByIdOrTitle(
   const note = byTitle[0] as Note;
   if (userId && note.user_id !== userId) return null;
   return note;
+}
+
+export type PublishedNoteView = Pick<
+  Note,
+  "id" | "title" | "content" | "updated_at" | "is_published" | "is_deleted"
+>;
+
+/**
+ * 获取已发布且未删除的笔记（供 /p/:id；依赖 RLS「Public can select published notes」）
+ */
+export async function getPublishedNoteById(
+  id: string
+): Promise<PublishedNoteView | null> {
+  const { data, error } = await supabase
+    .from("notes")
+    .select("id, title, content, updated_at, is_published, is_deleted")
+    .eq("id", id)
+    .eq("is_published", true)
+    .maybeSingle();
+
+  if (error) {
+    throwNoteServiceError("getPublishedNoteById", error, "加载公开笔记失败");
+  }
+  if (!data || !isNotePubliclyReadable(data as Note)) return null;
+  return data as PublishedNoteView;
 }
 
 /**

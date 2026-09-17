@@ -13,6 +13,7 @@ import {
   Calendar,
   FileText,
   Type,
+  Loader2,
 } from "lucide-react";
 import {
   PieChart,
@@ -43,6 +44,7 @@ export default function StatsPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -56,10 +58,13 @@ export default function StatsPage() {
         if (!cancelled) setStats(result);
       })
       .catch((err: unknown) => {
-        console.error(err);
+        console.error("[stats]", err);
         if (!cancelled) {
+          setStats(null);
           setError(
-            err instanceof Error ? err.message : "加载统计数据失败"
+            err instanceof Error
+              ? err.message
+              : "加载统计数据失败，请检查网络后重试"
           );
         }
       })
@@ -70,10 +75,14 @@ export default function StatsPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, reloadKey]);
 
   const handleBack = () => {
     router.push("/dashboard");
+  };
+
+  const handleRetry = () => {
+    setReloadKey((k) => k + 1);
   };
 
   if (!user) {
@@ -113,8 +122,18 @@ export default function StatsPage() {
         {loading ? (
           <StatsSkeleton />
         ) : error ? (
-          <div className="border border-destructive/40 bg-destructive/5 text-destructive text-sm px-4 py-3 rounded-lg">
-            {error}
+          <div className="border border-destructive/40 bg-destructive/5 text-destructive text-sm px-4 py-4 rounded-lg space-y-3">
+            <p className="font-medium">统计数据加载失败</p>
+            <p className="text-destructive/90 break-words">{error}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRetry}
+              className="min-h-10 touch-manipulation gap-2"
+            >
+              <Loader2 className="w-4 h-4" />
+              重试
+            </Button>
           </div>
         ) : !stats ? (
           <div className="border border-border bg-accent/40 text-sm px-4 py-3 rounded-lg text-muted-foreground">
@@ -124,7 +143,7 @@ export default function StatsPage() {
           <main className="space-y-8">
             <TopCards stats={stats} />
             <HeatmapSection stats={stats} />
-            <BottomSection stats={stats} userId={user.id} />
+            <BottomSection stats={stats} />
           </main>
         )}
       </div>
@@ -132,11 +151,9 @@ export default function StatsPage() {
   );
 }
 
-// --- Skeleton ---
-
 function StatsSkeleton() {
   return (
-    <div className="space-y-8">
+    <div className="space-y-8" aria-busy="true" aria-label="统计加载中">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
@@ -154,34 +171,16 @@ function StatsSkeleton() {
   );
 }
 
-// --- Top Cards ---
-
 function TopCards({ stats }: { stats: DashboardStats }) {
   const {
     userStats: { totalNotes, notesThisWeek, totalChars, activeDays },
   } = stats;
 
   const cards = [
-    {
-      label: "总笔记数",
-      value: totalNotes,
-      icon: FileText,
-    },
-    {
-      label: "本周新增",
-      value: notesThisWeek,
-      icon: Calendar,
-    },
-    {
-      label: "总字数",
-      value: totalChars,
-      icon: Type,
-    },
-    {
-      label: "活跃天数",
-      value: activeDays,
-      icon: BarChart2,
-    },
+    { label: "总笔记数", value: totalNotes, icon: FileText },
+    { label: "本周新增", value: notesThisWeek, icon: Calendar },
+    { label: "总字数", value: totalChars, icon: Type },
+    { label: "活跃天数", value: activeDays, icon: BarChart2 },
   ];
 
   return (
@@ -208,8 +207,6 @@ function TopCards({ stats }: { stats: DashboardStats }) {
   );
 }
 
-// --- Heatmap ---
-
 function HeatmapSection({ stats }: { stats: DashboardStats }) {
   const { heatmap } = stats;
   const hasData = heatmap.some((d) => d.count > 0);
@@ -235,14 +232,12 @@ function HeatmapSection({ stats }: { stats: DashboardStats }) {
       ) : (
         <div className="mt-3 overflow-x-auto">
           <div className="inline-flex gap-3">
-            {/* 星期标签 */}
             <div className="flex flex-col justify-between py-1 text-[10px] text-muted-foreground">
               <span>一</span>
               <span>三</span>
               <span>五</span>
               <span>日</span>
             </div>
-            {/* 热力格子 */}
             <div className="grid grid-flow-col auto-cols-[10px] grid-rows-7 gap-[3px]">
               {heatmap.map((day) => (
                 <div
@@ -250,9 +245,7 @@ function HeatmapSection({ stats }: { stats: DashboardStats }) {
                   title={`${day.date} · ${day.count} 字`}
                   className={cn(
                     "w-[10px] h-[10px] rounded-[3px] border border-transparent transition-colors",
-                    // 字数为 0：纯背景色（白色系）
                     day.count === 0 && "bg-background border-border/30",
-                    // 有字数：按强度映射为绿色系
                     day.count > 0 && day.intensity === 0 && "bg-emerald-100",
                     day.count > 0 && day.intensity === 1 && "bg-emerald-100",
                     day.count > 0 && day.intensity === 2 && "bg-emerald-300",
@@ -269,15 +262,64 @@ function HeatmapSection({ stats }: { stats: DashboardStats }) {
   );
 }
 
-// --- Bottom section: folder pie + recent notes ---
-
-function BottomSection({
-  stats,
-  userId,
+/** 仅客户端挂载后再渲染 Recharts，避免 SSR/零尺寸导致白屏 */
+function FolderPieChart({
+  folderDistribution,
+  totalForPie,
 }: {
-  stats: DashboardStats;
-  userId: string | null;
+  folderDistribution: DashboardStats["folderDistribution"];
+  totalForPie: number;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div className="w-full md:w-40 h-40 rounded-full bg-muted/50 animate-pulse" />
+    );
+  }
+
+  return (
+    <div className="w-full md:w-40 h-40 min-h-[160px]">
+      <ResponsiveContainer width="100%" height={160}>
+        <PieChart>
+          <Pie
+            data={folderDistribution}
+            dataKey="count"
+            nameKey="folderName"
+            innerRadius="60%"
+            outerRadius="90%"
+            paddingAngle={2}
+          >
+            {folderDistribution.map((entry, index) => (
+              <Cell
+                key={entry.folderId ?? `none-${index}`}
+                fill={getFolderColor(index)}
+              />
+            ))}
+          </Pie>
+          <RechartsTooltip
+            formatter={(value, _name, props) => {
+              const num = typeof value === "number" ? value : Number(value ?? 0);
+              const percent =
+                totalForPie === 0 || !Number.isFinite(num)
+                  ? 0
+                  : (num / totalForPie) * 100;
+              const label =
+                (props?.payload as { folderName?: string } | undefined)
+                  ?.folderName ?? "";
+              return [`${value ?? 0} 篇 (${percent.toFixed(1)}%)`, label];
+            }}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function BottomSection({ stats }: { stats: DashboardStats }) {
   const { folderDistribution, recentNotes } = stats;
   const totalForPie = folderDistribution.reduce(
     (acc, item) => acc + item.count,
@@ -286,7 +328,6 @@ function BottomSection({
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Folder pie */}
       <div className="rounded-xl border border-border bg-card/60 px-4 py-4 shadow-sm">
         <h2 className="text-sm font-semibold mb-1">文件夹分布</h2>
         <p className="text-xs text-muted-foreground mb-3">
@@ -298,39 +339,10 @@ function BottomSection({
           </div>
         ) : (
           <div className="flex flex-col md:flex-row items-center gap-4">
-            <div className="w-full md:w-40 h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={folderDistribution}
-                    dataKey="count"
-                    nameKey="folderName"
-                    innerRadius="60%"
-                    outerRadius="90%"
-                    paddingAngle={2}
-                  >
-                    {folderDistribution.map((entry, index) => (
-                      <Cell
-                        key={entry.folderId ?? `none-${index}`}
-                        fill={getFolderColor(index)}
-                      />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip
-                    formatter={(value: any, _name, props) => {
-                      const percent =
-                        totalForPie === 0
-                          ? 0
-                          : ((value as number) / totalForPie) * 100;
-                      return [
-                        `${value} 篇 (${percent.toFixed(1)}%)`,
-                        props.payload?.folderName ?? "",
-                      ];
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <FolderPieChart
+              folderDistribution={folderDistribution}
+              totalForPie={totalForPie}
+            />
             <div className="flex-1 space-y-2 text-xs">
               {folderDistribution.map((item, index) => (
                 <div
@@ -356,7 +368,6 @@ function BottomSection({
         )}
       </div>
 
-      {/* Recent notes */}
       <div className="lg:col-span-2 rounded-xl border border-border bg-card/60 px-4 py-4 shadow-sm">
         <h2 className="text-sm font-semibold mb-1">最近编辑</h2>
         <p className="text-xs text-muted-foreground mb-3">
@@ -368,19 +379,19 @@ function BottomSection({
           </div>
         ) : (
           <ul className="space-y-2 text-sm">
-            {recentNotes.map((note) => (
+            {recentNotes.map((n) => (
               <li
-                key={note.id}
+                key={n.id}
                 className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2"
               >
                 <div className="flex flex-col min-w-0">
                   <span className="font-medium truncate">
-                    {note.title || "未命名笔记"}
+                    {n.title || "未命名笔记"}
                   </span>
                   <span className="text-xs text-muted-foreground mt-0.5">
-                    {note.folderName || "未分组"} ·{" "}
-                    {note.updatedAt
-                      ? new Date(note.updatedAt).toLocaleString()
+                    {n.folderName || "未分组"} ·{" "}
+                    {n.updatedAt
+                      ? new Date(n.updatedAt).toLocaleString()
                       : "时间未知"}
                   </span>
                 </div>
@@ -392,5 +403,3 @@ function BottomSection({
     </section>
   );
 }
-
-

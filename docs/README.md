@@ -1,6 +1,22 @@
 # 文档目录
 
-本文档目录按类型组织，便于查找和阅读。
+> **状态**：[权威/现行]  
+> 本文档目录按类型组织，是「你要找什么 → 打开哪个文件」的路由表。  
+> **工程治理总规范**：根目录 [`AGENTS.md`](../AGENTS.md)  
+> **阶段任务过程资产**：[`../.phrase/docs/README.md`](../.phrase/docs/README.md)
+
+## 🧭 治理与过程（优先阅读）
+
+| 你要找什么 | 打开哪个文件 |
+| :--- | :--- |
+| AI/人类协作铁律与工作流 | [`../AGENTS.md`](../AGENTS.md) |
+| 当前 Phase / Task / Change | [`.phrase/docs/CHANGE.md`](../.phrase/docs/CHANGE.md) |
+| 缺陷索引 issueNNN | [`.phrase/docs/ISSUES.md`](../.phrase/docs/ISSUES.md) |
+| 全量变更日志（只追加） | [`changelog/CHANGELOG.md`](./changelog/CHANGELOG.md) |
+| CHANGELOG 路径兼容入口 | [`CHANGELOG.md`](./CHANGELOG.md) |
+| AI 协同认知升级手册 | [`guides/从VibeCoding到专业工程_AI协同认知升级手册.md`](./guides/从VibeCoding到专业工程_AI协同认知升级手册.md) |
+
+> **约定**：自 2026-09-16 起，**新的原子任务优先登记在 `.phrase/phases/`**；`docs/tasks/` 中的历史任务文档保留作归档参考，不硬删。
 
 ## 📁 目录结构
 
@@ -64,6 +80,8 @@
 
 ### 🗄️ sql/ - SQL脚本
 数据库表结构和迁移脚本
+- `allow_select_published_notes.sql` - **公开笔记 SELECT RLS**（发布功能 `/p` 匿名可读，issue005）
+- `create_user_recent_notes.sql` - **最近打开云端表**（issue003 跨端同步）
 - `create_mind_notes_tables.sql` - 创建思维笔记表
 - `add_folder_support_to_mind_notes.sql` - 添加文件夹支持
 - `create_note_versions.sql` - 创建笔记版本表
@@ -93,14 +111,23 @@
 → 查看 `guides/` 文件夹
 
 ### 我想查看项目变更历史
-→ 查看 `changelog/` 文件夹
+→ 查看 `changelog/CHANGELOG.md`（或根级薄索引 `docs/CHANGELOG.md`）
 
 ### 我需要数据库脚本
 → 查看 `sql/` 文件夹
 
+### 我想按 AGENTS 规范推进任务
+→ 查看 `.phrase/docs/CHANGE.md` 定位当前阶段，再打开对应 `task_*.md`
+
+### 我想登记新 Bug
+→ 先写 `.phrase/docs/ISSUES.md`（现行 issue001–010）；历史汇编仍可参考 `reports/BUG_REPORT.md`
+
+### 思维笔记还做吗？
+→ **计划下线**（ADR：`.phrase/phases/phase-bug-triage-mindnote-sunset-20260916/adr_mind-note-sunset_20260916.md`）；相关需求/设计文档已标状态，不硬删
+
 ---
 
-**最后更新**: 2026-03-05
+**最后更新**: 2026-09-16
 
 
 

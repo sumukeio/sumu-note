@@ -6,6 +6,7 @@ import { createNoteVersion } from "@/lib/version-history";
 import { cacheNoteContent, isOnline, savePendingSyncNote } from "@/lib/offline-storage";
 import { vibrateSuccess } from "@/lib/haptics";
 import { buildNoteFingerprint } from "@/lib/note-fingerprint";
+import { deriveAutoTitleFromContent } from "@/lib/note-title";
 import type { Note } from "@/types/note";
 
 export type SaveStatus = "saved" | "saving" | "error" | "unsaved";
@@ -51,7 +52,7 @@ export function useNoteSave(
     published: boolean,
     currentTags: string[],
     showToast?: boolean
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   saveStatus: SaveStatus;
   setSaveStatus: React.Dispatch<React.SetStateAction<SaveStatus>>;
   refs: NoteSaveRefs;
@@ -85,8 +86,8 @@ export function useNoteSave(
       published: boolean,
       currentTags: string[],
       showToast = false
-    ) => {
-      if (!currentNote) return;
+    ): Promise<boolean> => {
+      if (!currentNote) return false;
 
       setSaveStatus("saving");
       const now = new Date();
@@ -96,8 +97,7 @@ export function useNoteSave(
 
       let finalTitle = currentTitle;
       if (!finalTitle.trim()) {
-        finalTitle =
-          currentContent.split("\n")[0]?.replace(/[#*`]/g, "").trim().slice(0, 30) || "";
+        finalTitle = deriveAutoTitleFromContent(currentContent);
         onTitleDerived?.(finalTitle);
       }
 
@@ -198,7 +198,7 @@ export function useNoteSave(
             currentContent,
             currentTags
           ).catch((err) => console.warn("Failed to create note version:", err));
-          return;
+          return true;
         }
 
         const errorMessage = saveError.message || String(saveError);
@@ -232,6 +232,8 @@ export function useNoteSave(
             }).catch(() => {});
             lastSaveTimeRef.current = nowTimestamp;
             isSavingRef.current = false;
+            // 离线仅入队：公开链接此时不可靠
+            return false;
           } catch (err) {
             setSaveStatus("error");
             isSavingRef.current = false;
@@ -241,8 +243,8 @@ export function useNoteSave(
               variant: "destructive",
               duration: 5000,
             });
+            return false;
           }
-          return;
         }
 
         if (saveRetryCountRef.current < 3) {
@@ -266,6 +268,7 @@ export function useNoteSave(
             variant: "default",
             duration: 2000,
           });
+          return false;
         } else {
           setSaveStatus("error");
           isSavingRef.current = false;
@@ -278,6 +281,7 @@ export function useNoteSave(
             variant: "destructive",
             duration: 5000,
           });
+          return false;
         }
       } else {
         try {
@@ -295,9 +299,11 @@ export function useNoteSave(
           lastSavedTimestampRef.current = now.toISOString();
           lastSaveTimeRef.current = nowTimestamp;
           isSavingRef.current = false;
+          return false;
         } catch (err) {
           setSaveStatus("error");
           isSavingRef.current = false;
+          return false;
         }
       }
     },

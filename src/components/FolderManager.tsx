@@ -3,14 +3,17 @@
 import { useState, useRef, useEffect } from "react";
 import { Folder, Trash2, FolderInput, X, Check, Loader2, Plus, Pencil } from "lucide-react"; // 🔥 引入 Pencil
 import { supabase } from "@/lib/supabase";
-import { updateNotesFolder } from "@/lib/note-service";
+import { deleteFoldersCascade } from "@/lib/folder-service";
+import { getFolderDescendantIds } from "@/lib/folder-utils";
+import type { FolderItem } from "@/types/note";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Input } from "@/components/ui/input";
 import { DndContext, DragOverlay, useDraggable, useDroppable, TouchSensor, MouseSensor, useSensor, useSensors, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { vibrateSelection } from "@/lib/haptics";
+import { isSelectionSafeOverlayTarget } from "@/lib/ui-event-guards";
+import { MoveToFolderDialog, MOVE_TARGET_ROOT } from "@/components/MoveToFolderDialog";
 
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
@@ -28,14 +31,15 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
-  const [targetFolders, setTargetFolders] = useState<any[]>([]); 
+  const [targetFolders, setTargetFolders] = useState<FolderItem[]>([]);
+  const [lastMoveTargetId, setLastMoveTargetId] = useState<string | null>(null);
+  const [pendingMoveFolderIds, setPendingMoveFolderIds] = useState<string[]>([]);
+  const [isMoving, setIsMoving] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState<"create" | "rename">("create");
   const [editingFolder, setEditingFolder] = useState<any | null>(null);
   const [folderNameInput, setFolderNameInput] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [moveConfirmDialogOpen, setMoveConfirmDialogOpen] = useState(false);
-  const [pendingMoveTargetId, setPendingMoveTargetId] = useState<string | null>(null);
 
   const isSelectionMode = selectedIds.size > 0;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -48,10 +52,11 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
 
     const shouldIgnore = (target: HTMLElement | null) => {
       if (!target) return true;
+      if (document.querySelector('[data-slot="dialog-content"]')) return true;
+      if (isSelectionSafeOverlayTarget(target)) return true;
       return !!(
         target.closest("[data-root-folder-card]") ||
-        target.closest("[data-root-folder-header]") ||
-        target.closest("[data-selection-dock]")
+        target.closest("[data-root-folder-header]")
       );
     };
 
@@ -110,79 +115,121 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
 
   const confirmDelete = async () => {
     const ids = Array.from(selectedIds);
-    const { error } = await supabase.from('folders').delete().in('id', ids);
-    if (!error) {
-      setFolders(prev => prev.filter(f => !selectedIds.has(f.id)));
+    try {
+      const result = await deleteFoldersCascade(userId, ids);
+      const deletedSet = new Set(result.deletedFolderIds);
+      setFolders((prev) => prev.filter((f) => !deletedSet.has(f.id)));
       exitSelectionMode();
+      const notePart =
+        result.softDeletedNoteIds.length > 0
+          ? `，${result.softDeletedNoteIds.length} 个笔记已移入回收站`
+          : "";
       toast({
         title: "删除成功",
-        description: `${ids.length} 个文件夹已删除`,
+        description: `${result.deletedFolderIds.length} 个文件夹已删除${notePart}`,
         variant: "default",
       });
-    } else {
+    } catch (err: unknown) {
       toast({
         title: "删除失败",
-        description: error.message || "删除文件夹时出错",
+        description: (err as Error)?.message || "删除文件夹时出错",
         variant: "destructive",
       });
     }
     setDeleteDialogOpen(false);
   };
 
-  const handleMoveClick = () => {
-    const targets = folders.filter(f => !selectedIds.has(f.id));
-    setTargetFolders(targets);
+  const handleMoveClick = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      toast({
+        title: "无法移动",
+        description: "请先选中要移动的文件夹",
+        variant: "default",
+      });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("folders")
+      .select("id, name, parent_id, user_id, created_at")
+      .eq("user_id", userId);
+
+    if (error || !data) {
+      toast({
+        title: "加载失败",
+        description: error?.message || "加载文件夹列表时出错",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const allFolders = data as FolderItem[];
+    const excludeIds = new Set<string>(ids);
+    for (const fid of ids) {
+      getFolderDescendantIds(allFolders, fid).forEach((id) => excludeIds.add(id));
+    }
+    setTargetFolders(allFolders.filter((f) => !excludeIds.has(f.id)));
+    setPendingMoveFolderIds(ids);
     setIsMoveDialogOpen(true);
   };
 
-  const handleMoveTargetClick = (targetFolderId: string) => {
-    setPendingMoveTargetId(targetFolderId);
-    setMoveConfirmDialogOpen(true);
-  };
-
-  const executeMove = async (targetFolderId: string, keepOriginal: boolean) => {
-    const idsToMove = Array.from(selectedIds);
-    if (keepOriginal) {
-        const { error } = await supabase.from('folders').update({ parent_id: targetFolderId }).in('id', idsToMove);
-        if (error) {
-          toast({
-            title: "移动失败",
-            description: error.message || "移动文件夹时出错",
-            variant: "destructive",
-          });
-          return;
-        }
-    } else {
-        try {
-          await updateNotesFolder(idsToMove, targetFolderId, userId);
-        } catch (notesError: unknown) {
-          toast({
-            title: "移动失败",
-            description: (notesError as Error)?.message || "移动笔记时出错",
-            variant: "destructive",
-          });
-          return;
-        }
-        const { error: foldersError } = await supabase.from('folders').delete().in('id', idsToMove);
-        if (foldersError) {
-          toast({
-            title: "移动失败",
-            description: foldersError.message || "删除文件夹时出错",
-            variant: "destructive",
-          });
-          return;
-        }
+  const handleMoveToTarget = async (targetFolderId: string | null) => {
+    if (isMoving) return;
+    const idsToMove =
+      pendingMoveFolderIds.length > 0
+        ? pendingMoveFolderIds
+        : Array.from(selectedIds);
+    if (idsToMove.length === 0) {
+      toast({
+        title: "移动已取消",
+        description: "未选中任何文件夹，请重新选中后再移动",
+        variant: "destructive",
+      });
+      setIsMoveDialogOpen(false);
+      setPendingMoveFolderIds([]);
+      return;
     }
+
+    setIsMoving(true);
     toast({
-      title: "移动成功",
-      description: `${idsToMove.length} 个文件夹已移动`,
-      variant: "success",
+      title: "正在移动…",
+      description: `${idsToMove.length} 个文件夹`,
+      variant: "default",
+      duration: 2000,
     });
-    fetchFolders();
-    setIsMoveDialogOpen(false);
-    setMoveConfirmDialogOpen(false);
-    setPendingMoveTargetId(null);
-    exitSelectionMode();
+
+    try {
+      const { error } = await supabase
+        .from("folders")
+        .update({ parent_id: targetFolderId })
+        .in("id", idsToMove);
+
+      if (error) {
+        toast({
+          title: "移动失败",
+          description: error.message || "移动文件夹时出错",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "移动成功",
+        description:
+          targetFolderId === null
+            ? `${idsToMove.length} 个文件夹已移到根目录`
+            : `${idsToMove.length} 个文件夹已移动`,
+        variant: "success",
+      });
+      fetchFolders();
+      setIsMoveDialogOpen(false);
+      setPendingMoveFolderIds([]);
+      setLastMoveTargetId(targetFolderId === null ? MOVE_TARGET_ROOT : targetFolderId);
+      exitSelectionMode();
+    } finally {
+      setIsMoving(false);
+    }
   };
 
   // 🔥 新增：重命名功能
@@ -423,6 +470,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
           onClick={(e) => {
             if (!isSelectionMode) return;
             const target = e.target as HTMLElement;
+            if (isSelectionSafeOverlayTarget(target)) return;
             if (target.closest("[data-root-folder-card]")) return;
             exitSelectionMode();
           }}
@@ -474,7 +522,9 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
         className={cn(
           "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300",
           "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]",
-          isSelectionMode ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none"
+          isSelectionMode && !isMoveDialogOpen
+            ? "translate-y-0 opacity-100"
+            : "translate-y-20 opacity-0 pointer-events-none"
         )}
       >
         <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
@@ -498,18 +548,20 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
         </div>
       </div>
 
-      <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
-        <DialogContent>
-            <DialogHeader><DialogTitle>移动到...</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto py-4">
-                {targetFolders.map(tf => (
-                    <Button key={tf.id} variant="outline" className="justify-start h-auto py-3" onClick={() => handleMoveTargetClick(tf.id)}>
-                        <Folder className="w-4 h-4 mr-2 text-yellow-500" />{tf.name}
-                    </Button>
-                ))}
-            </div>
-        </DialogContent>
-      </Dialog>
+      <MoveToFolderDialog
+        open={isMoveDialogOpen}
+        onOpenChange={(open) => {
+          setIsMoveDialogOpen(open);
+          if (!open) {
+            setPendingMoveFolderIds([]);
+            setIsMoving(false);
+          }
+        }}
+        targets={targetFolders}
+        lastMoveTargetId={lastMoveTargetId}
+        onSelect={handleMoveToTarget}
+        busy={isMoving}
+      />
 
       {/* 新建 / 重命名 文件夹弹窗 */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -553,7 +605,7 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
           <DialogHeader>
             <DialogTitle>删除文件夹</DialogTitle>
             <DialogDescription>
-              删除这 {selectedIds.size} 个文件夹？里面的笔记也会消失！
+              删除这 {selectedIds.size} 个文件夹及其子文件夹？其中的笔记会移入回收站。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -562,44 +614,6 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
               确认删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 移动确认对话框 */}
-      <Dialog open={moveConfirmDialogOpen} onOpenChange={setMoveConfirmDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>移动文件夹</DialogTitle>
-            <DialogDescription>
-              保留原文件夹结构吗？
-              <br />
-              <br />
-              [确定] = 保留文件夹结构
-              <br />
-              [取消] = 不保留，只移动笔记
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (pendingMoveTargetId) {
-                  executeMove(pendingMoveTargetId, false);
-                }
-              }}
-            >
-              不保留
-            </Button>
-            <Button
-              onClick={() => {
-                if (pendingMoveTargetId) {
-                  executeMove(pendingMoveTargetId, true);
-                }
-              }}
-            >
-              保留
             </Button>
           </DialogFooter>
         </DialogContent>

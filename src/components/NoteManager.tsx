@@ -17,6 +17,7 @@ import { supabase } from "@/lib/supabase";
 import {
   getNotes,
   getNoteByIdInFolder,
+  getNoteById,
   createNote,
   updateNote,
   deleteNote,
@@ -27,6 +28,7 @@ import {
   moveNotesToFolder,
 } from "@/lib/note-service";
 import { useNoteSave } from "@/hooks/useNoteSave";
+import { computeNoteWordStats } from "@/lib/note-word-stats";
 import { useNoteRealtime } from "@/hooks/useNoteRealtime";
 import { useLinkComplete } from "@/hooks/useLinkComplete";
 import { useTagComplete } from "@/hooks/useTagComplete";
@@ -40,6 +42,7 @@ import { NoteList } from "@/components/NoteList";
 import { NoteEditor } from "@/components/NoteEditor";
 import { MoveToFolderDialog, MOVE_TARGET_ROOT } from "@/components/MoveToFolderDialog";
 import { getFolderDescendantIds } from "@/lib/folder-utils";
+import { deleteFoldersCascade } from "@/lib/folder-service";
 import { type Match } from "@/lib/search-utils";
 import type { Note, FolderItem } from "@/types/note";
 
@@ -58,10 +61,11 @@ interface NoteManagerProps {
   onBack: () => void;
   onEnterFolder?: (folderId: string, folderName: string) => void; // 进入子文件夹的回调
   initialNoteId?: string | null; // 初始要打开的笔记 ID（用于从搜索结果跳转）
+  onInitialNoteOpened?: () => void;
 }
 
 // --- 主组件 ---
-export default function NoteManager({ userId, folderId, folderName, onBack, onEnterFolder, initialNoteId }: NoteManagerProps) {
+export default function NoteManager({ userId, folderId, folderName, onBack, onEnterFolder, initialNoteId, onInitialNoteOpened }: NoteManagerProps) {
   const { toast } = useToast();
   const [view, setView] = useState<'list' | 'editor'>('list');
   const [notes, setNotes] = useState<Note[]>([]);
@@ -104,6 +108,14 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   const [moveSubfolderDialogOpen, setMoveSubfolderDialogOpen] = useState(false);
   const [moveSubfolderTargets, setMoveSubfolderTargets] = useState<FolderItem[]>([]);
   const [lastMoveTargetId, setLastMoveTargetId] = useState<string | null>(null);
+  /** 打开移动弹窗时快照选中项，避免弹窗期间 selectedIds 被清空导致静默失败 */
+  const [pendingMove, setPendingMove] = useState<{
+    noteIds: string[];
+    folderIds: string[];
+    originalFolderParents: { id: string; parent_id: string | null }[];
+    originalNoteParents: { id: string; folder_id: string | null }[];
+  } | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
 
   // 读取上次移动目标（本地缓存，按用户区分）
   useEffect(() => {
@@ -285,7 +297,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         console.error("fetchNotes error:", e);
       } finally {
         setLoading(false);
-        setSelectedIds(new Set());
+        // 禁止在此清空 selectedIds：与多选/移动弹窗重叠时会导致确认时选中已空、静默失败（issue009）
       }
   };
 
@@ -351,6 +363,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       if (note) {
         // 找到笔记，打开编辑模式
         enterEditor(note);
+        onInitialNoteOpened?.();
         // 延迟重置处理标志，确保 enterEditor 完成
         setTimeout(() => {
           isProcessingInitialNoteRef.current = false;
@@ -364,13 +377,27 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       .then((data) => {
         if (data) {
           enterEditor(data);
+          onInitialNoteOpened?.();
           setTimeout(() => {
             isProcessingInitialNoteRef.current = false;
           }, 100);
         } else {
-          console.warn("Failed to load note: not found in folder");
-          processedInitialNoteIdRef.current = null;
-          isProcessingInitialNoteRef.current = false;
+          // 文件夹参数可能过期：按 id 再试一次
+          getNoteById(initialNoteId, userId)
+            .then((fallback) => {
+              if (fallback) {
+                enterEditor(fallback);
+                onInitialNoteOpened?.();
+              } else {
+                console.warn("Failed to load note: not found");
+                processedInitialNoteIdRef.current = null;
+              }
+              isProcessingInitialNoteRef.current = false;
+            })
+            .catch(() => {
+              processedInitialNoteIdRef.current = null;
+              isProcessingInitialNoteRef.current = false;
+            });
         }
       })
       .catch(() => {
@@ -423,13 +450,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         updatedAt: note.updated_at || null,
       }).catch(() => {});
       // 内容辅助功能：初始化字数统计
-      const contentText = note.content || "";
-      const chineseChars = (contentText.match(/[\u4e00-\u9fa5]/g) || []).length;
-      const englishWords = (contentText.match(/[a-zA-Z]+/g) || []).length;
-      const words = chineseChars + englishWords;
-      const paragraphs = contentText.split('\n').filter((line: string) => line.trim().length > 0).length;
-      const readingTime = Math.ceil(words / 200);
-      setWordStats({ words, paragraphs, readingTime });
+      setWordStats(computeNoteWordStats(note.content || ""));
       // 解析 tags 字段（假设为以逗号分隔的字符串）
       const rawTags = note.tags;
       if (rawTags) {
@@ -454,15 +475,24 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       saveRefs.lastSavedTimestampRef.current = note.updated_at || new Date().toISOString();
   };
 
+  // issue007：编辑态正文变化时 debounce 刷新字数/段落/阅读时间
+  useEffect(() => {
+    if (view !== "editor") return;
+    const timer = window.setTimeout(() => {
+      setWordStats(computeNoteWordStats(content));
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [content, view]);
+
   const handleAddNote = async () => {
     try {
       const data = await createNote({ user_id: userId, folder_id: folderId, title: "", content: "" });
       enterEditor(data);
       toast({
         title: "新笔记已创建",
-        description: "点击撤销可删除此空白笔记",
+        description: "可撤销删除；标题在顶部可直接编辑",
         variant: "default",
-        duration: 5000,
+        duration: 4000,
         undoAction: async () => {
           await deleteNote(data.id, userId);
           setView("list");
@@ -733,12 +763,27 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   };
 
   const togglePublish = async () => {
+      if (!currentNote) return;
       const newStatus = !isPublished;
+      const prev = isPublished;
       setIsPublished(newStatus);
-      await saveNote(title, content, isPinned, newStatus, tags);
-      if (newStatus && currentNote) {
+      const ok = await saveNote(title, content, isPinned, newStatus, tags);
+      if (!ok) {
+          setIsPublished(prev);
+          toast({
+            title: newStatus ? "发布失败" : "取消发布失败",
+            description: "未能同步到云端，请检查网络后重试。离线时公开链接不可用。",
+            variant: "destructive",
+          });
+          return;
+      }
+      if (newStatus) {
           const url = `${window.location.origin}/p/${currentNote.id}`;
-          navigator.clipboard.writeText(url);
+          try {
+            await navigator.clipboard.writeText(url);
+          } catch {
+            // 剪贴板失败仍展示链接
+          }
           toast({
             title: "已发布",
             description: `公开链接已复制：${url}`,
@@ -747,7 +792,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       } else {
           toast({
             title: "已取消发布",
-            description: "链接已失效",
+            description: "公开链接已失效",
             variant: "default",
           });
       }
@@ -1382,33 +1427,47 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     // 分离文件夹ID和笔记ID
     const folderIds = ids.filter(id => subFolders.some(f => f.id === id));
     const noteIds = ids.filter(id => notes.some(n => n.id === id));
-    // 快照当前居此数据，供撤销时使用
-    const deletedFoldersCopy = subFolders.filter(f => folderIds.includes(f.id));
+    // 快照：当前列表中被选中的笔记（文件夹树快照由 deleteFoldersCascade 返回）
     const deletedNotesCopy = notes.filter(n => noteIds.includes(n.id));
     
     if (showTrash) {
       // 回收站：永久删除，需要确认
       setBatchDeleteDialogOpen(true);
     } else {
-      // 删除文件夹
+      let cascadeFolderRows: FolderItem[] = [];
+      let cascadeFolderCount = 0;
+      let cascadeNoteIds: string[] = [];
+
+      // 删除文件夹（含全部后代，叶子优先；子树内笔记进回收站）— issue010
       if (folderIds.length > 0) {
-        const { error: folderError } = await supabase.from('folders').delete().in('id', folderIds);
-        if (folderError) {
+        try {
+          const result = await deleteFoldersCascade(userId, folderIds);
+          cascadeFolderRows = result.deletedFolderRows;
+          cascadeFolderCount = result.deletedFolderIds.length;
+          cascadeNoteIds = result.softDeletedNoteIds;
+          const deletedSet = new Set(result.deletedFolderIds);
+          setSubFolders((prev) => prev.filter((f) => !deletedSet.has(f.id)));
+          if (cascadeNoteIds.length > 0) {
+            const noteSet = new Set(cascadeNoteIds);
+            setNotes((prev) => prev.filter((n) => !noteSet.has(n.id)));
+          }
+        } catch (folderError: unknown) {
           toast({
             title: "删除失败",
-            description: folderError.message || "删除文件夹时出错",
+            description: (folderError as Error)?.message || "删除文件夹时出错",
             variant: "destructive",
           });
           return;
         }
-        setSubFolders(prev => prev.filter(f => !folderIds.includes(f.id)));
       }
       
-      // 删除笔记：移入回收站
-      if (noteIds.length > 0) {
+      // 删除笔记：移入回收站（排除已随文件夹处理过的）
+      const cascadeNoteSet = new Set(cascadeNoteIds);
+      const noteIdsOnly = noteIds.filter((id) => !cascadeNoteSet.has(id));
+      if (noteIdsOnly.length > 0) {
         try {
-          await setNotesDeleted(noteIds, userId, true);
-          setNotes(prev => prev.filter(n => !noteIds.includes(n.id)));
+          await setNotesDeleted(noteIdsOnly, userId, true);
+          setNotes(prev => prev.filter(n => !noteIdsOnly.includes(n.id)));
         } catch (noteError: unknown) {
           toast({
             title: "删除失败",
@@ -1419,22 +1478,45 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         }
       }
 
-      if (folderIds.length > 0 || noteIds.length > 0) {
+      const totalTrashedNotes = new Set([...noteIdsOnly, ...cascadeNoteIds]).size;
+
+      if (cascadeFolderCount > 0 || totalTrashedNotes > 0) {
         vibrateShort();
         exitSelectionMode();
         toast({
           title: "删除成功",
-          description: `${folderIds.length > 0 ? `${folderIds.length} 个文件夹已删除，` : ''}${noteIds.length > 0 ? `${noteIds.length} 个笔记已移入回收站` : ''}`,
+          description: `${cascadeFolderCount > 0 ? `${cascadeFolderCount} 个文件夹已删除，` : ""}${totalTrashedNotes > 0 ? `${totalTrashedNotes} 个笔记已移入回收站` : ""}`,
           variant: "default",
           duration: 5000,
           undoAction: async () => {
-            if (deletedFoldersCopy.length > 0) {
-              await supabase.from("folders").insert(
-                deletedFoldersCopy.map(({ id, name, parent_id, user_id }) => ({ id, name, parent_id, user_id: user_id ?? userId }))
-              );
+            if (cascadeFolderRows.length > 0) {
+              // 父先于子插入，避免 parent_id 外键失败
+              const byId = new Map(cascadeFolderRows.map((f) => [f.id, f]));
+              const remaining = new Set(cascadeFolderRows.map((f) => f.id));
+              while (remaining.size > 0) {
+                const batch = [...remaining].filter((id) => {
+                  const p = byId.get(id)?.parent_id;
+                  return !p || !remaining.has(p);
+                });
+                const rows = (batch.length > 0 ? batch : [[...remaining][0]!]).map((id) => {
+                  const f = byId.get(id)!;
+                  return {
+                    id: f.id,
+                    name: f.name,
+                    parent_id: f.parent_id ?? null,
+                    user_id: f.user_id ?? userId,
+                  };
+                });
+                await supabase.from("folders").insert(rows);
+                for (const r of rows) remaining.delete(r.id);
+              }
             }
-            if (deletedNotesCopy.length > 0) {
-              await setNotesDeleted(deletedNotesCopy.map((n) => n.id), userId, false);
+            const restoreNoteIds = [
+              ...deletedNotesCopy.map((n) => n.id),
+              ...cascadeNoteIds,
+            ];
+            if (restoreNoteIds.length > 0) {
+              await setNotesDeleted([...new Set(restoreNoteIds)], userId, false);
             }
             fetchSubFolders();
             fetchNotes();
@@ -1483,106 +1565,139 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     }
     const targets = allFolders.filter((f) => !excludeIds.has(f.id));
 
-    // 无其他文件夹时仍可移动到根目录
+    // 快照选中项（弹窗期间 selectedIds 可能被空白点击/列表刷新清掉）
+    setPendingMove({
+      noteIds,
+      folderIds,
+      originalFolderParents: folderIds.map((id) => ({
+        id,
+        parent_id: subFolders.find((f) => f.id === id)?.parent_id ?? null,
+      })),
+      originalNoteParents: noteIds.map((id) => ({
+        id,
+        folder_id: notes.find((n) => n.id === id)?.folder_id ?? null,
+      })),
+    });
     setMoveSubfolderTargets(targets);
     setMoveSubfolderDialogOpen(true);
   };
 
   const handleMoveSubfoldersToTarget = async (targetFolderId: string | null) => {
-    const ids = Array.from(selectedIds);
-    const folderIds = ids.filter((id) => subFolders.some((f) => f.id === id));
-    const noteIds = ids.filter((id) => notes.some((n) => n.id === id));
+    if (isMoving) return;
+
+    const snapshot = pendingMove;
+    const folderIds = snapshot?.folderIds ?? [];
+    const noteIds = snapshot?.noteIds ?? [];
     if (folderIds.length === 0 && noteIds.length === 0) {
+      toast({
+        title: "移动已取消",
+        description: "未选中任何内容，请重新选中后再移动",
+        variant: "destructive",
+      });
       setMoveSubfolderDialogOpen(false);
+      setPendingMove(null);
       return;
     }
 
     const isRoot = targetFolderId === null || targetFolderId === MOVE_TARGET_ROOT;
-
-    if (folderIds.length > 0) {
-      const { error: folderError } = await supabase
-        .from("folders")
-        .update({ parent_id: isRoot ? null : targetFolderId })
-        .in("id", folderIds);
-
-      if (folderError) {
-        toast({
-          title: "移动失败",
-          description: folderError.message || "移动文件夹时出错",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
-    if (noteIds.length > 0) {
-      try {
-        await moveNotesToFolder(noteIds, userId, isRoot ? null : targetFolderId);
-      } catch (noteError: unknown) {
-        toast({
-          title: "移动失败",
-          description: (noteError as Error)?.message || "移动笔记时出错",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
-    const movedFoldersText =
-      folderIds.length > 0 ? `${folderIds.length} 个文件夹` : "";
-    const movedNotesText =
-      noteIds.length > 0 ? `${noteIds.length} 篇笔记` : "";
-
-    // 记住原始位置，供撤销时使用
-    const originalFolderParents = folderIds.map((id) => ({
-      id,
-      parent_id: subFolders.find((f) => f.id === id)?.parent_id ?? null,
-    }));
-    const originalNoteParents = noteIds.map((id) => ({
-      id,
-      folder_id: notes.find((n) => n.id === id)?.folder_id ?? null,
-    }));
-
+    setIsMoving(true);
     toast({
-      title: "移动成功",
+      title: "正在移动…",
       description:
-        movedFoldersText && movedNotesText
-          ? `${movedFoldersText} 与 ${movedNotesText} 已移动`
-          : movedFoldersText || movedNotesText || "内容已移动",
-      variant: "success",
-      duration: 5000,
-      undoAction: async () => {
-        for (const { id, parent_id } of originalFolderParents) {
-          await supabase.from("folders").update({ parent_id }).eq("id", id);
-        }
-        for (const { id, folder_id } of originalNoteParents) {
-          await moveNoteToFolder(id, userId, folder_id);
-        }
-        fetchSubFolders();
-        fetchNotes();
-        toast({
-          title: "已撤销移动",
-          description: "内容已还原到原来的位置",
-          variant: "default",
-          duration: 3000,
-        });
-      },
+        noteIds.length > 0 && folderIds.length === 0
+          ? `${noteIds.length} 篇笔记`
+          : folderIds.length > 0 && noteIds.length === 0
+            ? `${folderIds.length} 个文件夹`
+            : `${folderIds.length} 个文件夹、${noteIds.length} 篇笔记`,
+      variant: "default",
+      duration: 2000,
     });
 
-    setLastMoveTargetId(isRoot ? MOVE_TARGET_ROOT : targetFolderId!);
-    if (typeof window !== "undefined" && userId) {
-      try {
-        const key = `sumunote:lastMoveFolder:${userId}`;
-        window.localStorage.setItem(key, isRoot ? MOVE_TARGET_ROOT : targetFolderId!);
-      } catch {
-        // 忽略本地存储错误
-      }
-    }
+    try {
+      if (folderIds.length > 0) {
+        const { error: folderError } = await supabase
+          .from("folders")
+          .update({ parent_id: isRoot ? null : targetFolderId })
+          .in("id", folderIds);
 
-    setMoveSubfolderDialogOpen(false);
-    fetchSubFolders();
-    fetchNotes();
-    exitSelectionMode();
+        if (folderError) {
+          toast({
+            title: "移动失败",
+            description: folderError.message || "移动文件夹时出错",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      if (noteIds.length > 0) {
+        try {
+          await moveNotesToFolder(noteIds, userId, isRoot ? null : targetFolderId);
+        } catch (noteError: unknown) {
+          toast({
+            title: "移动失败",
+            description: (noteError as Error)?.message || "移动笔记时出错",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      const movedFoldersText =
+        folderIds.length > 0 ? `${folderIds.length} 个文件夹` : "";
+      const movedNotesText =
+        noteIds.length > 0 ? `${noteIds.length} 篇笔记` : "";
+
+      const originalFolderParents = snapshot?.originalFolderParents ?? [];
+      const originalNoteParents = snapshot?.originalNoteParents ?? [];
+
+      toast({
+        title: "移动成功",
+        description:
+          movedFoldersText && movedNotesText
+            ? `${movedFoldersText} 与 ${movedNotesText} 已移动`
+            : movedFoldersText || movedNotesText || "内容已移动",
+        variant: "success",
+        duration: 5000,
+        undoAction: async () => {
+          for (const { id, parent_id } of originalFolderParents) {
+            await supabase.from("folders").update({ parent_id }).eq("id", id);
+          }
+          for (const { id, folder_id } of originalNoteParents) {
+            await moveNoteToFolder(id, userId, folder_id);
+          }
+          fetchSubFolders();
+          fetchNotes();
+          toast({
+            title: "已撤销移动",
+            description: "内容已还原到原来的位置",
+            variant: "default",
+            duration: 3000,
+          });
+        },
+      });
+
+      setLastMoveTargetId(isRoot ? MOVE_TARGET_ROOT : targetFolderId!);
+      if (typeof window !== "undefined" && userId) {
+        try {
+          const key = `sumunote:lastMoveFolder:${userId}`;
+          window.localStorage.setItem(
+            key,
+            isRoot ? MOVE_TARGET_ROOT : targetFolderId!
+          );
+        } catch {
+          // 忽略本地存储错误
+        }
+      }
+
+      setMoveSubfolderDialogOpen(false);
+      setPendingMove(null);
+      fetchSubFolders();
+      fetchNotes();
+      exitSelectionMode();
+    } finally {
+      setIsMoving(false);
+    }
   };
 
   const confirmBatchDelete = async () => {
@@ -2024,6 +2139,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         onPin={handlePin}
         onCopy={handleCopy}
         sensors={sensors}
+        selectionDockVisible={!moveSubfolderDialogOpen}
       />
         {/* 批量删除确认对话框（回收站） */}
         <Dialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
@@ -2056,10 +2172,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       {/* 文件夹 / 笔记移动对话框 */}
       <MoveToFolderDialog
         open={moveSubfolderDialogOpen}
-        onOpenChange={setMoveSubfolderDialogOpen}
+        onOpenChange={(open) => {
+          setMoveSubfolderDialogOpen(open);
+          if (!open) {
+            setPendingMove(null);
+            setIsMoving(false);
+          }
+        }}
         targets={moveSubfolderTargets}
         lastMoveTargetId={lastMoveTargetId}
         onSelect={handleMoveSubfoldersToTarget}
+        busy={isMoving}
       />
 
         {/* 重命名对话框 */}

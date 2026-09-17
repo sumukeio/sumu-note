@@ -39,6 +39,7 @@ import NoteStats from "@/components/NoteStats";
 import FindReplaceDialog from "@/components/FindReplaceDialog";
 import SegmentedEditor from "@/components/SegmentedEditor";
 import { cn } from "@/lib/utils";
+import { shouldStartInMobileReadingMode } from "@/lib/mobile-editor-entry";
 import type { Note } from "@/types/note";
 import type { Match } from "@/lib/search-utils";
 
@@ -120,7 +121,7 @@ export interface NoteEditorProps {
     published: boolean,
     tags: string[],
     showToast?: boolean
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   onContentChange: (newTitle: string, newContent: string) => void;
   onSegmentedEditorChange: (newContent: string) => void;
   onInsertTable: () => void;
@@ -233,13 +234,26 @@ export function NoteEditor(props: NoteEditorProps) {
   const moreMenuPortalRef = moreMenuPortalRefProp ?? localMoreMenuPortalRef;
 
   const isMobile = useIsMobile();
-  const [isMobileReadingMode, setIsMobileReadingMode] = useState(true);
+  const [isMobileReadingMode, setIsMobileReadingMode] = useState(() =>
+    shouldStartInMobileReadingMode({
+      title: currentNote?.title,
+      content: currentNote?.content,
+    })
+  );
   const [tocOpen, setTocOpen] = useState(false);
   const { toast } = useToast();
   const outline = useMemo(() => extractOutline(content), [content]);
 
   useEffect(() => {
-    if (currentNote?.id) setIsMobileReadingMode(true);
+    if (!currentNote?.id) return;
+    // 仅在切换笔记时决定入口态；编辑过程中不因 content 回写切回阅读态
+    setIsMobileReadingMode(
+      shouldStartInMobileReadingMode({
+        title: currentNote.title,
+        content: currentNote.content,
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟笔记 id 切换
   }, [currentNote?.id]);
 
   useEffect(() => {

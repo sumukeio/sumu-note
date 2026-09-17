@@ -1,0 +1,21 @@
+# 文档驱动工作流（摘要）
+
+> **仲裁**：以根目录 `AGENTS.md` 第四节、第五节为准。
+
+## 流程
+
+```text
+锁定需求/文档 → 拆 taskNNN → 实施与验证 → 回写 task/change/CHANGELOG → 刹车等待确认
+```
+
+## `.phrase/`
+
+- 新阶段仅在人类明确要求时创建 `phase-<purpose>-<YYYYMMDD>/`。
+- 最小集：`spec_*`、`plan_*`、`task_*`、`change_*`。
+- Bug：先登 `.phrase/docs/ISSUES.md`，再拆 task。
+
+## docs/
+
+- 总路由：`docs/README.md`
+- 变更正文：`docs/changelog/CHANGELOG.md`（只追加）
+- 过时文档：文首状态标识或迁入 `docs/archive/`，禁止硬删

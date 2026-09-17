@@ -10,6 +10,15 @@ type StorageLike = {
   removeItem: (key: string) => void
 }
 
+export type AuthStorageMode = 'localStorage' | 'memory' | 'ssr'
+
+let authStorageMode: AuthStorageMode = 'ssr'
+
+/** 当前鉴权存储模式（客户端创建后可读） */
+export function getAuthStorageMode(): AuthStorageMode {
+  return authStorageMode
+}
+
 function createSafeStorage(): StorageLike | undefined {
   if (typeof window === 'undefined') return undefined
 
@@ -26,6 +35,7 @@ function createSafeStorage(): StorageLike | undefined {
   })()
 
   if (canUseLocalStorage) {
+    authStorageMode = 'localStorage'
     return {
       getItem: (key) => {
         try {
@@ -39,6 +49,7 @@ function createSafeStorage(): StorageLike | undefined {
           window.localStorage.setItem(key, value)
         } catch {
           memory.set(key, value)
+          authStorageMode = 'memory'
         }
       },
       removeItem: (key) => {
@@ -52,6 +63,7 @@ function createSafeStorage(): StorageLike | undefined {
   }
 
   // localStorage 不可用时，退化为内存存储（会话仅在当前标签页有效）
+  authStorageMode = 'memory'
   return {
     getItem: (key) => memory.get(key) ?? null,
     setItem: (key, value) => memory.set(key, value),

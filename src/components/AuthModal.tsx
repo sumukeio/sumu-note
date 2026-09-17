@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase, getAuthStorageMode } from "@/lib/supabase";
 import { ensureSessionAfterSignIn } from "@/lib/auth-utils";
+import { shouldHardNavigateAfterLogin } from "@/lib/auth-session-resilience";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -66,15 +67,42 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
         if (error) throw error;
 
         const session =
-          data.session ?? (await ensureSessionAfterSignIn());
+          data.session ?? (await ensureSessionAfterSignIn(5000));
         if (!session) {
-          throw new Error("登录成功但会话未就绪，请重试");
+          throw new Error(
+            "登录成功但会话未写入本机，请关闭无痕模式后重试，或换网络再试"
+          );
         }
 
-        // 使用 replace 避免历史中保留登录页，提升手机端返回手势体验
-        router.replace("/dashboard");
+        const storageMode = getAuthStorageMode();
+        if (storageMode === "memory") {
+          toast({
+            title: "登录状态无法长期保存",
+            description:
+              "当前浏览器处于无痕/隐私模式或禁止本地存储。可先进入，但刷新后需重新登录。",
+            variant: "default",
+            duration: 5000,
+          });
+        } else {
+          toast({
+            title: "登录成功",
+            description: "正在进入工作台…",
+            variant: "success",
+            duration: 2000,
+          });
+        }
+
         onClose();
 
+        // iOS WebKit：软跳转后偶发读不到刚写入的 session → 硬跳更稳（localStorage 可用时）
+        if (
+          typeof window !== "undefined" &&
+          shouldHardNavigateAfterLogin(storageMode)
+        ) {
+          window.location.assign("/dashboard");
+        } else {
+          router.replace("/dashboard");
+        }
       } else {
         const { error } = await supabase.auth.signUp({
           email,
@@ -133,7 +161,12 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-[400px] bg-zinc-950 border-zinc-800 text-white">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-center">Sumu Note</DialogTitle>

@@ -23,7 +23,10 @@ export interface MoveToFolderDialogProps {
   targets: FolderItem[];
   /** 上次移动目标 id，MOVE_TARGET_ROOT 表示根目录 */
   lastMoveTargetId: string | null;
-  onSelect: (targetFolderId: string | null) => void;
+  /** 选择目标；可为 async，完成前按钮禁用 */
+  onSelect: (targetFolderId: string | null) => void | Promise<void>;
+  /** 外部正在执行移动时禁用选择 */
+  busy?: boolean;
 }
 
 export function MoveToFolderDialog({
@@ -32,9 +35,12 @@ export function MoveToFolderDialog({
   targets,
   lastMoveTargetId,
   onSelect,
+  busy = false,
 }: MoveToFolderDialogProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
+  const [selecting, setSelecting] = useState(false);
+  const locked = busy || selecting;
 
   // 构建 parent -> children 映射，并排序
   const byParent = useMemo(() => {
@@ -123,14 +129,24 @@ export function MoveToFolderDialog({
   const hasChildren = (folderId: string) =>
     (byParent.get(folderId)?.length ?? 0) > 0;
 
-  const handleSelectRoot = () => {
-    onSelect(null);
-    onOpenChange(false);
+  const handleSelectRoot = async () => {
+    if (locked) return;
+    setSelecting(true);
+    try {
+      await onSelect(null);
+    } finally {
+      setSelecting(false);
+    }
   };
 
-  const handleSelectFolder = (id: string) => {
-    onSelect(id);
-    onOpenChange(false);
+  const handleSelectFolder = async (id: string) => {
+    if (locked) return;
+    setSelecting(true);
+    try {
+      await onSelect(id);
+    } finally {
+      setSelecting(false);
+    }
   };
 
   const showLastMove =
@@ -139,12 +155,21 @@ export function MoveToFolderDialog({
       targets.some((f) => f.id === lastMoveTargetId));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (locked && !next) return;
+        if (!next) setSearchQuery("");
+        onOpenChange(next);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>移动到...</DialogTitle>
           <DialogDescription>
-            选择目标文件夹，或选择「根目录」移到顶层。
+            {locked
+              ? "正在移动，请稍候…"
+              : "选择目标文件夹，或选择「根目录」移到顶层。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -169,6 +194,7 @@ export function MoveToFolderDialog({
                     ? handleSelectRoot()
                     : handleSelectFolder(lastMoveTargetId!)
                 }
+                disabled={locked}
               >
                 {lastMoveTargetId === MOVE_TARGET_ROOT ? (
                   <>
@@ -202,6 +228,7 @@ export function MoveToFolderDialog({
               variant="outline"
               className="justify-start h-auto py-2 text-sm w-full"
               onClick={handleSelectRoot}
+              disabled={locked}
             >
               <Home className="w-4 h-4 mr-2 text-muted-foreground" />
               <span>根目录</span>
@@ -245,6 +272,7 @@ export function MoveToFolderDialog({
                         className="justify-start h-auto py-2 text-sm flex-1 min-w-0"
                         style={{ paddingLeft: 8 }}
                         onClick={() => handleSelectFolder(folder.id)}
+                        disabled={locked}
                       >
                         <Folder className="w-4 h-4 mr-2 shrink-0 text-yellow-500" />
                         <span className="truncate">

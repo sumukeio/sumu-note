@@ -1,8 +1,107 @@
 # 更新日志
 
-本文档记录项目的重要更新和修复。
+> **状态**：[权威/现行]  
+> 本文档记录项目的重要更新和修复。**只追加、不覆盖。**  
+> 路径兼容入口：[`docs/CHANGELOG.md`](../CHANGELOG.md)
 
-## 2026-03-XX（最新）
+## 2026-09-17
+
+### 🐛 issue002 iPhone 登录后进不去（task011） ✅（待真机确认）
+
+- **环境**：iPhone 8 Plus · iOS 16.3.1 · 多浏览器；首页/登录可开，登录后静默进不去
+- **根因假设**：登录后进 dashboard 时 `getSession` 偶发空 → 静默踢回首页；未登录分支未结束 loading
+- **修复**：session 短重试；成功后硬跳转；回流 `/?auth=required` + Toast；无痕存储告警
+- **验证**：`tests/lib/auth-session-resilience.test.ts` 3 passed；`tsc --noEmit` 通过
+
+### 🐛 issue001 手机新建 Toast 挡标题 / 页态不一致（task010） ✅
+
+- **问题**：Toast 贴顶挡住标题；空白新建先进阅读态需再点编辑
+- **修复**：Toast 全端贴底；`shouldStartInMobileReadingMode`——空白直进编辑、有内容仍先阅读
+- **验证**：`tests/lib/mobile-editor-entry.test.ts` 2 passed；`tsc --noEmit` 通过
+
+### 🐛 issue007 编辑页字数/段落/阅读时间非实时（task009） ✅
+
+- **问题**：统计仅在打开笔记时计算，输入不更新
+- **修复**：`computeNoteWordStats`；编辑态对 `content` debounce 200ms 刷新
+- **字数口径（产品确认）**：非空白字符数（中英数字标点均计，空白不计）；段落仍为非空行
+- **验证**：`tests/lib/note-word-stats.test.ts` 4 passed；`tsc --noEmit` 通过
+
+### 🐛 issue008 正文链接编辑态易误触（task008） ✅
+
+- **问题**：编辑态单击 URL/`[[wiki]]` 即弹「打开链接」
+- **修复**：编辑态普通单击只落光标；桌面 Cmd/Ctrl+点击、手机长按/右键才确认；预览态保持单击（MarkdownRenderer）
+- **验证**：`tests/lib/editor-link-gesture.test.ts` 6 passed；`tsc --noEmit` 通过
+
+### 🐛 issue004 自动标题字数上限（task007） ✅
+
+- **问题**：空标题保存时从正文首行截取上限为 30，产品期望 10
+- **修复**：抽出 `deriveAutoTitleFromContent`（`AUTO_TITLE_MAX_LENGTH=10`）；`useNoteSave` 接入
+- **验证**：`tests/lib/note-title.test.ts` 6 passed；`tsc --noEmit` 通过
+
+### 🐛 issue009 移动功能双端无反应（task006） ✅
+
+- **问题**：多选后点「移动」弹窗内目标时无反应 / 静默退出
+- **根因**：① 选中态 document 捕获空白点击未忽略 Dialog；② `fetchNotes` finally 无条件清空 `selectedIds`，弹窗期间选中被洗掉；确认时读空选中且曾无 Toast
+- **修复**：`isSelectionSafeOverlayTarget`；打开弹窗时快照 `pendingMove`；去掉 fetchNotes 清选中；即时「正在移动…」Toast；弹窗期间隐藏 Dock；Dialog `z-[60]`
+- **验证**：`tests/lib/ui-event-guards.test.ts` 3 passed；`tsc --noEmit` 通过
+- **手测**：单选笔记 → 移动 → 选目标 → 应出现「正在移动…」再「移动成功」
+
+### 🐛 issue003 最近打开点击无反应 / 非云端（task005） ✅
+
+- **问题**：手机点「最近打开」无反应；列表仅 localStorage，无法跨端
+- **修复**：`user_recent_notes` 云端表 + 本地合并；点击改为状态直开（查真实 folder_id）；失败 Toast；打开后清除 initialNoteId
+- **运维**：执行 `docs/sql/create_user_recent_notes.sql`（未执行时降级本地，点击修复仍生效）
+- **验证**：`tests/lib/recent-notes.test.ts` 3 passed；`tsc --noEmit` 通过
+
+### 🐛 issue006 统计仪表盘加载失败（task004） ✅
+
+- **问题**：`/dashboard/stats` 加载不出来
+- **修复**：`getDashboardStats` 改为单次拉取再纯函数聚合（避免 4 次全量并行）；Recharts 饼图仅客户端挂载并固定高度；失败展示原因+重试
+- **验证**：`tests/lib/stats.test.ts` 6 passed；`tsc --noEmit` 通过
+
+### 🐛 issue005 发布功能失败（task003） ✅
+
+- **问题**：发布后链接指向 `/p/{id}`，但无对应路由；保存失败仍提示已发布
+- **修复**：新增公开页 `/p/[id]`、`getPublishedNoteById`、可读性校验；ADR 锁定语义；提供 RLS SQL；`save` 返回成功与否，发布失败回滚状态并 Toast
+- **运维**：请在 Supabase 执行 `docs/sql/allow_select_published_notes.sql`（匿名访客必需）
+- **验证**：`tests/lib/note-publish.test.ts` 4 passed；`tsc --noEmit` 通过
+
+### 🐛 issue010 删除文件夹外键失败（task002） ✅
+
+- **问题**：删除含有子文件夹的文件夹时报 `folders_parent_id_fkey`
+- **修复**：`resolveFolderIdsForDelete` 展开后代并叶子优先删除；`deleteFoldersCascade` 同步将子树笔记移入回收站；`NoteManager` / `FolderManager` 接入
+- **验证**：`npm test -- --run tests/lib/folder-utils.test.ts`（5 passed）；`npm run type-check` 通过
+- **文件**：`src/lib/folder-utils.ts`、`src/lib/folder-service.ts`、`tests/lib/folder-utils.test.ts`、`NoteManager.tsx`、`FolderManager.tsx`
+
+## 2026-09-16
+
+### ✅ 产品拍板落盘（无代码）
+
+- 最近打开 → **云端全局**（issue003）
+- 自动标题上限 → **10**（issue004）
+- 链接误触 → **同意编辑态防误触手势**（issue008）
+- 首页/笔记/文件夹改版 → **待讨论**，未立项
+- 详情：`.phrase/phases/phase-bug-triage-mindnote-sunset-20260916/adr_product-decisions_recents-title-link_20260916.md`
+
+### 🩺 Bug 分诊登记 + 思维笔记计划下线（phase-bug-triage / task001） ✅
+
+- **决策**：思维笔记 **计划下线**（本期仅 ADR，不实施下线代码）→ `.phrase/phases/phase-bug-triage-mindnote-sunset-20260916/adr_mind-note-sunset_20260916.md`
+- **登记**：`issue001`–`issue010` 见 `.phrase/docs/ISSUES.md`；详情与优先级见同 phase `issue_triage_20260916.md`
+- **建议先修**：issue010（删文件夹 FK）→ issue005（发布/`/p`）→ issue006（统计）
+- **验证**：仅文档；无 `src/` 业务改动
+
+### 🧱 工程治理脚手架落地（task001） ✅
+
+- **依据**：根目录 `AGENTS.md` 本地化；阶段 `phase-engineering-governance-20260916`
+- **变更**：
+  - 适配 Sumu Note 技术栈与负向禁令；标明对数据平台专属条款的「暂缓启用」
+  - 新增 `.phrase/`（spec/plan/task/change + CHANGE/ISSUES 索引）
+  - 新增 `.agents/rules/`、`.cursor/rules/`、`.cursorrules`
+  - 更新 `docs/README.md` 治理路由；新增 `docs/CHANGELOG.md` 薄索引
+- **验证**：关键路径文件存在；无业务运行时代码改动
+- **影响**：仅协作流程与文档可追溯性
+
+## 2026-03-XX
 
 ### 🧩 Dock 多选与编辑体验修复（2026-03-18）
 
