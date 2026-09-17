@@ -46,9 +46,13 @@
   **验证**：`npm test -- --run tests/lib/auth-session-resilience.test.ts` 通过；`npm run type-check` 通过。  
   **影响范围**：`auth-utils.ts`、`auth-session-resilience.ts`、`useRequireAuth.ts`、`AuthModal.tsx`、`page.tsx`、`supabase.ts`。
 
+- [x] **task012** 产出：issue002 续修——登录硬跳；handoff/storage 优先放行；根 layout 常驻 AuthDebugPanel；调试日志 localStorage。  
+  **验证**：`npm test -- --run tests/lib/auth-login-handoff.test.ts tests/lib/auth-session-resilience.test.ts` 通过；`npm run type-check` 通过。  
+  **影响范围**：`auth-login-handoff.ts`、`useRequireAuth.tsx`、`AuthModal.tsx`、`layout.tsx`、`AuthDebugPanel.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机复验 issue002；或开启思维笔记下线实施。  
+- 下一建议：真机复验 issue002（task012）；或开启思维笔记下线实施。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

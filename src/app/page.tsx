@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
-import AuthDebugPanel from "@/components/AuthDebugPanel";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -158,7 +157,6 @@ function LandingPageInner() {
         onClose={() => setIsAuthOpen(false)}
         defaultTab={authTab}
       />
-      <AuthDebugPanel />
     </div>
   );
 }

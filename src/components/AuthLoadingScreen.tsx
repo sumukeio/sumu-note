@@ -33,8 +33,11 @@ export default function AuthLoadingScreen({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background px-6">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        <p className="text-xs text-muted-foreground text-center">
+          正在验证登录状态…
+        </p>
       </div>
     );
   }

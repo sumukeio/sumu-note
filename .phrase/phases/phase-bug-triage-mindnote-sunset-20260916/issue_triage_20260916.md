@@ -45,12 +45,12 @@
 | **级别** | P1 |
 | **环境** | iPhone 8 Plus · **iOS 16.3.1** · 多浏览器均复现（非单一浏览器） |
 | **期望** | 登录后进入 dashboard |
-| **实际** | 首页/登录页可加载；输入账号密码后进不去；**无白屏、无报错** |
-| **相关路径** | `AuthModal.tsx`；`useRequireAuth.ts`；`auth-utils.ts`；`supabase.ts` |
-| **根因假设** | 登录成功后进 `/dashboard` 时 `getSession` 偶发空 → 静默 `replace('/')`；未登录分支未 `setLoading(false)` 表现为空转 |
-| **修复（task011 / 2026-09-17）** | session 短重试；localStorage 时硬跳转；回流 `/?auth=required`+Toast；内存存储告警 |
+| **实际** | 演进：静默进不去 → 登录成功后白屏转圈 → 软跳后留首页；调试条仅首页可见 |
+| **相关路径** | `AuthModal.tsx`；`useRequireAuth.tsx`；`auth-utils.ts`；`auth-login-handoff.ts`；`layout.tsx` |
+| **根因假设** | 软跳卡在路由过渡（dashboard 未挂载）；`getSession` 在 iOS 上挂死/空 |
+| **修复（task011–012 / 2026-09-17）** | 登录后硬跳；handoff+storage 优先放行；根 layout 常驻调试条；日志 localStorage |
 | **验证** | 单测通过；**待该机真机确认**后方可勾选 issue |
-| **待用户确认** | 部署/刷新后在该 iPhone 再登录一次 |
+| **待用户确认** | 先开 `/?debugAuth=1` 再登录；应进工作台且页底有 `login:hard-nav` / `admit:handoff` 或 `admit:storage` |
 
 ---
 

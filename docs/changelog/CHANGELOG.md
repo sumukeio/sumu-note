@@ -6,11 +6,18 @@
 
 ## 2026-09-17
 
-### 🔧 issue002 续修：登录后留在首页 + 手机调试条
+### 🔧 issue002 续修：白屏无调试条 + 硬跳放行（task012）
 
-- **现象**：Toast「登录成功」后仍停在首页（疑似进 dashboard 又被踢回）
-- **处理**：登录 handoff（sessionStorage）；踢回前再试；软跳失败则硬跳；`?debugAuth=1` 页底鉴权日志
-- **验证**：auth-login-handoff + auth-session-resilience 测试通过
+- **现象**：登录后白屏转圈；仅 `/?debugAuth=1` 能见绿条，白屏页加参仍空白
+- **根因假设**：软跳卡在路由过渡，dashboard 未挂载；鉴权又卡在 `getSession`
+- **处理**：登录后 `location.assign` 硬跳；handoff/localStorage user 优先放行；调试条挂根 layout；日志改 localStorage
+- **验证**：auth-login-handoff 4 + auth-session-resilience 6 passed；`tsc --noEmit` 通过
+
+### 🔧 issue002 续修：handoff 优先放行 + 调试条跨页
+
+- **现象**：登录后白屏转圈；`/?debugAuth=1` 有日志，dashboard 上看不到
+- **处理**：有 handoff 时先放行再后台校验；`debugAuth=1` 写入 localStorage 跨页；调试条 z-index 拉高
+- **手测**：先开 `/?debugAuth=1`，再登录；应进工作台且页底有 `handoff-first` 日志
 
 ### 🐛 issue002 iPhone 登录后进不去（task011） ✅（待真机确认）
 

@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 import ViewportVars from "@/components/ViewportVars";
+import AuthDebugPanel from "@/components/AuthDebugPanel";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           >
             {children}
             <Toaster />
+            <AuthDebugPanel />
           </ThemeProvider>
       </body>
     </html>

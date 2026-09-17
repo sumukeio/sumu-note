@@ -3,6 +3,19 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task012 issue002 续修：硬跳 + 根级调试条
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `auth-login-handoff.ts` | handoff 双写；调试日志改 localStorage；debug 开关持久化 |
+| Modify | `useRequireAuth.tsx` | handoff/storage 优先放行；首挂一次；后台校验 |
+| Modify | `AuthModal.tsx` | 登录成功后 `location.assign` 硬跳（弃软跳） |
+| Modify | `layout.tsx` | 根布局常驻 `AuthDebugPanel` |
+| Modify | `dashboard/page.tsx` / `page.tsx` | 去掉重复调试挂载 |
+
+**现象**：白屏转圈；仅首页 `?debugAuth=1` 有绿条。  
+**验证**：auth-login-handoff 4 + auth-session-resilience 6；type-check 通过。
+
 ## 2026-09-17 — task011 修复 issue002 iOS 登录后进不去
 
 | 动作 | 路径 | 说明 |

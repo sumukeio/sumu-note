@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { supabase, getAuthStorageMode } from "@/lib/supabase";
 import { ensureSessionAfterSignIn } from "@/lib/auth-utils";
-import { markAuthHandoff, pushAuthDebug } from "@/lib/auth-login-handoff";
+import { markAuthHandoff, pushAuthDebug, dashboardUrlWithDebug } from "@/lib/auth-login-handoff";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -36,7 +35,6 @@ interface AuthModalProps {
 }
 
 export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: AuthModalProps) {
-  const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
@@ -96,26 +94,17 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
           id: session.user.id,
           email: session.user.email,
         });
+        const target = dashboardUrlWithDebug();
         pushAuthDebug("login:success", {
           userId: session.user.id,
           storageMode,
+          target,
         });
 
-        // 先跳转再关弹窗，避免 iOS 上 Dialog 关闭打断路由
-        router.replace("/dashboard");
-        pushAuthDebug("login:soft-nav", { to: "/dashboard" });
-
-        window.setTimeout(() => {
-          onClose();
-          // 若仍停在首页，硬跳（鉴权侧已有超时/降级，不应再永久转圈）
-          if (
-            window.location.pathname === "/" ||
-            window.location.pathname === ""
-          ) {
-            pushAuthDebug("login:hard-nav-fallback");
-            window.location.assign("/dashboard");
-          }
-        }, 500);
+        // iOS：软跳常卡在白屏且不挂载 dashboard；硬跳 + handoff/storage 放行
+        onClose();
+        pushAuthDebug("login:hard-nav", { to: target });
+        window.location.assign(target);
       } else {
         const { error } = await supabase.auth.signUp({
           email,

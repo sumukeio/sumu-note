@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { useRequireAuth, RequireAuthDebugMount } from "@/hooks/useRequireAuth";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import { getNoteFolderId, getFolderAncestorStack, searchNotes } from "@/lib/note-service";
 import {
@@ -475,17 +475,13 @@ function DashboardPageContent() {
 
   if (!user) {
     return (
-      <>
-        <AuthLoadingScreen loading={loading} authError={authError} onRetry={retry} />
-        <RequireAuthDebugMount />
-      </>
+      <AuthLoadingScreen loading={loading} authError={authError} onRetry={retry} />
     );
   }
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-      <RequireAuthDebugMount />
-      
+
       {/* 导航栏 */}
       <nav className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-20 pt-[env(safe-area-inset-top)]">
         <div className="max-w-4xl mx-auto px-3 sm:px-4 h-14 min-h-[3.5rem] sm:h-16 flex items-center justify-between gap-2 sm:gap-4">

@@ -1,17 +1,37 @@
 /**
  * 登录 → dashboard 交接（issue002）
- * iOS 上软跳后 getSession 可能仍为空，用 sessionStorage 短时交接避免被踢回首页。
+ * iOS 上 getSession 可能挂死/空；用短时 handoff + 硬跳转优先放行。
+ * 调试日志写入 localStorage，避免软跳/硬跳后「看不见绿条」。
  */
 
 const HANDOFF_KEY = "sumu:auth-handoff";
 const DEBUG_KEY = "sumu:auth-debug";
-const HANDOFF_TTL_MS = 30_000;
+const DEBUG_FLAG_KEY = "sumu:debugAuth";
+const HANDOFF_TTL_MS = 60_000;
 
 export type AuthHandoffPayload = {
   at: number;
   userId: string;
   email?: string | null;
 };
+
+function writeJson(storage: Storage, key: string, value: unknown): void {
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
+function readJson<T>(storage: Storage, key: string): T | null {
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
 
 export function markAuthHandoff(user: {
   id: string;
@@ -23,29 +43,29 @@ export function markAuthHandoff(user: {
     userId: user.id,
     email: user.email ?? null,
   };
-  try {
-    window.sessionStorage.setItem(HANDOFF_KEY, JSON.stringify(payload));
-  } catch {
-    // ignore
-  }
+  // session + local 双写：部分 WebView 硬跳后 sessionStorage 偶发不可用
+  writeJson(window.sessionStorage, HANDOFF_KEY, payload);
+  writeJson(window.localStorage, HANDOFF_KEY, payload);
   pushAuthDebug("handoff:marked", payload);
 }
 
 export function peekAuthHandoff(): AuthHandoffPayload | null {
   if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(HANDOFF_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as AuthHandoffPayload;
-    if (!parsed?.userId || !parsed?.at) return null;
-    if (Date.now() - parsed.at > HANDOFF_TTL_MS) {
-      window.sessionStorage.removeItem(HANDOFF_KEY);
-      return null;
-    }
-    return parsed;
-  } catch {
+  const fromSession = readJson<AuthHandoffPayload>(
+    window.sessionStorage,
+    HANDOFF_KEY
+  );
+  const fromLocal = readJson<AuthHandoffPayload>(
+    window.localStorage,
+    HANDOFF_KEY
+  );
+  const parsed = fromSession ?? fromLocal;
+  if (!parsed?.userId || !parsed?.at) return null;
+  if (Date.now() - parsed.at > HANDOFF_TTL_MS) {
+    clearAuthHandoff();
     return null;
   }
+  return parsed;
 }
 
 export function clearAuthHandoff(): void {
@@ -55,19 +75,23 @@ export function clearAuthHandoff(): void {
   } catch {
     // ignore
   }
+  try {
+    window.localStorage.removeItem(HANDOFF_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 export function pushAuthDebug(step: string, detail?: unknown): void {
   if (typeof window === "undefined") return;
+  const entry = { t: Date.now(), step, detail };
   try {
-    const prev = window.sessionStorage.getItem(DEBUG_KEY);
+    const prev = window.localStorage.getItem(DEBUG_KEY);
     const list: { t: number; step: string; detail?: unknown }[] = prev
       ? JSON.parse(prev)
       : [];
-    list.push({ t: Date.now(), step, detail });
-    // 只保留最近 30 条
-    const trimmed = list.slice(-30);
-    window.sessionStorage.setItem(DEBUG_KEY, JSON.stringify(trimmed));
+    list.push(entry);
+    window.localStorage.setItem(DEBUG_KEY, JSON.stringify(list.slice(-50)));
   } catch {
     // ignore
   }
@@ -76,10 +100,14 @@ export function pushAuthDebug(step: string, detail?: unknown): void {
   }
 }
 
-export function readAuthDebugLog(): { t: number; step: string; detail?: unknown }[] {
+export function readAuthDebugLog(): {
+  t: number;
+  step: string;
+  detail?: unknown;
+}[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.sessionStorage.getItem(DEBUG_KEY);
+    const raw = window.localStorage.getItem(DEBUG_KEY);
     if (!raw) return [];
     return JSON.parse(raw) as { t: number; step: string; detail?: unknown }[];
   } catch {
@@ -87,12 +115,26 @@ export function readAuthDebugLog(): { t: number; step: string; detail?: unknown 
   }
 }
 
+/** URL ?debugAuth=1 会写入 localStorage，之后各页都能开调试条 */
 export function isAuthDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    if (window.localStorage.getItem("sumu:debugAuth") === "1") return true;
-    return new URLSearchParams(window.location.search).get("debugAuth") === "1";
+    const q = new URLSearchParams(window.location.search).get("debugAuth");
+    if (q === "1") {
+      window.localStorage.setItem(DEBUG_FLAG_KEY, "1");
+      return true;
+    }
+    if (q === "0") {
+      window.localStorage.removeItem(DEBUG_FLAG_KEY);
+      return false;
+    }
+    return window.localStorage.getItem(DEBUG_FLAG_KEY) === "1";
   } catch {
     return false;
   }
+}
+
+export function dashboardUrlWithDebug(): string {
+  if (typeof window === "undefined") return "/dashboard";
+  return isAuthDebugEnabled() ? "/dashboard?debugAuth=1" : "/dashboard";
 }
