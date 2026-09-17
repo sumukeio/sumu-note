@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, getAuthStorageMode } from "@/lib/supabase";
 import { ensureSessionAfterSignIn } from "@/lib/auth-utils";
+import { markAuthHandoff, pushAuthDebug } from "@/lib/auth-login-handoff";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -91,10 +92,30 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "login" }: Aut
           });
         }
 
-        onClose();
+        markAuthHandoff({
+          id: session.user.id,
+          email: session.user.email,
+        });
+        pushAuthDebug("login:success", {
+          userId: session.user.id,
+          storageMode,
+        });
 
-        // iOS：硬跳转整页重载后 getSession 可能挂死转圈；同页软跳可复用内存会话
+        // 先跳转再关弹窗，避免 iOS 上 Dialog 关闭打断路由
         router.replace("/dashboard");
+        pushAuthDebug("login:soft-nav", { to: "/dashboard" });
+
+        window.setTimeout(() => {
+          onClose();
+          // 若仍停在首页，硬跳（鉴权侧已有超时/降级，不应再永久转圈）
+          if (
+            window.location.pathname === "/" ||
+            window.location.pathname === ""
+          ) {
+            pushAuthDebug("login:hard-nav-fallback");
+            window.location.assign("/dashboard");
+          }
+        }, 500);
       } else {
         const { error } = await supabase.auth.signUp({
           email,

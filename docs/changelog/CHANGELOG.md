@@ -6,11 +6,11 @@
 
 ## 2026-09-17
 
-### 🔧 issue002 续修：登录后白屏转圈（task011）
+### 🔧 issue002 续修：登录后留在首页 + 手机调试条
 
-- **现象**：已显示「登录成功」；dashboard 白屏中间转圈
-- **处理**：`getSession` 单次超时；localStorage 解析 user 降级；鉴权 UI 10s 总闸；改回软跳转（避免整页重载挂死）
-- **验证**：`tests/lib/auth-session-resilience.test.ts` 6 passed
+- **现象**：Toast「登录成功」后仍停在首页（疑似进 dashboard 又被踢回）
+- **处理**：登录 handoff（sessionStorage）；踢回前再试；软跳失败则硬跳；`?debugAuth=1` 页底鉴权日志
+- **验证**：auth-login-handoff + auth-session-resilience 测试通过
 
 ### 🐛 issue002 iPhone 登录后进不去（task011） ✅（待真机确认）
 
