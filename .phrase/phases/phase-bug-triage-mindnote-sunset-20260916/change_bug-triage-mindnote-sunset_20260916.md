@@ -3,6 +3,17 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task015 issue002 续修：禁止首页自动跳转
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `page.tsx` | 去掉 getSession 自动进 dashboard；改为「进入工作台」 |
+| Modify | `dashboard/page.tsx` | 鉴权后懒加载 Home；15s 超时+回首页 |
+| Modify | `AuthLoadingScreen.tsx` | 验证中也可回首页 |
+| Modify | `DashboardHomeClient.tsx` | NoteManager dynamic，减轻首包 |
+
+**验证**：type-check 通过。
+
 ## 2026-09-17 — task014 issue002 续修：去掉「正在加载工作台」卡死
 
 | 动作 | 路径 | 说明 |

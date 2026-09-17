@@ -58,9 +58,13 @@
   **验证**：`npm run type-check` 通过。  
   **影响范围**：`dashboard/page.tsx`、`DashboardHomeClient.tsx`、`page.tsx`。
 
+- [x] **task015** 产出：issue002 续修——取消首页自动跳转；加载超时/回首页；轻量鉴权包 + 懒加载工作台。  
+  **验证**：`npm run type-check` 通过。  
+  **影响范围**：`page.tsx`、`dashboard/page.tsx`、`AuthLoadingScreen.tsx`、`DashboardHomeClient.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机复验 issue002（task014）；绿条应有 `dashboard-home:mount`。  
+- 下一建议：真机复验——首页应能停留；点进入工作台后看是否出现 `dashboard-home:import-ok` / `mount`。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

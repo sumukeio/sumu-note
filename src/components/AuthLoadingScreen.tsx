@@ -38,6 +38,14 @@ export default function AuthLoadingScreen({
         <p className="text-xs text-muted-foreground text-center">
           正在验证登录状态…
         </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2"
+          onClick={() => router.replace("/")}
+        >
+          返回首页
+        </Button>
       </div>
     );
   }

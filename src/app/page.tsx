@@ -5,8 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
-import { supabase } from "@/lib/supabase";
+import { readUserFromAuthStorage } from "@/lib/auth-utils";
 import { useToast } from "@/components/ui/use-toast";
+import { pushAuthDebug } from "@/lib/auth-login-handoff";
 
 function LandingPageInner() {
   const router = useRouter();
@@ -14,6 +15,7 @@ function LandingPageInner() {
   const { toast } = useToast();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authTab, setAuthTab] = useState<"login" | "register">("login");
+  const [canEnterDashboard, setCanEnterDashboard] = useState(false);
 
   const openAuth = (tab: "login" | "register") => {
     setAuthTab(tab);
@@ -34,42 +36,14 @@ function LandingPageInner() {
     router.replace("/", { scroll: false });
   }, [searchParams, router, toast]);
 
-  // 近期登录过的用户自动跳转到 dashboard
+  // 已登录：只提示「进入工作台」，禁止自动跳转（避免 iOS 上来不及看调试条 / 掉进白屏）
   useEffect(() => {
-    let cancelled = false;
-
-    const checkUser = async () => {
-      try {
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession();
-
-        if (error) {
-          if (
-            error.message?.includes("Refresh Token") ||
-            error.message?.includes("JWT")
-          ) {
-            await supabase.auth.signOut();
-            return;
-          }
-        }
-
-        if (!cancelled && session?.user) {
-          // 硬跳，避免与 dashboard 软跳/Suspense 打架形成首页↔工作台循环
-          window.location.replace("/dashboard");
-        }
-      } catch (e) {
-        console.warn("Failed to check auth on landing:", e);
-      }
-    };
-
-    checkUser();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    const cached = readUserFromAuthStorage();
+    if (cached) {
+      setCanEnterDashboard(true);
+      pushAuthDebug("landing:session-cached", { userId: cached.id });
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
@@ -78,6 +52,17 @@ function LandingPageInner() {
           Sumu Note
         </div>
         <div className="flex gap-4">
+          {canEnterDashboard ? (
+            <Button
+              className="bg-white text-black hover:bg-zinc-200 font-bold"
+              onClick={() => {
+                pushAuthDebug("landing:enter-dashboard-click");
+                window.location.assign("/dashboard");
+              }}
+            >
+              进入工作台
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             className="text-zinc-400 hover:text-white"
@@ -116,20 +101,34 @@ function LandingPageInner() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-200 z-10">
-          <Button
-            size="lg"
-            className="h-12 px-8 text-lg bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold shadow-lg shadow-blue-900/50"
-            onClick={() => openAuth("register")}
-          >
-            立即免费开始 <ArrowRight className="ml-2 w-4 h-4" />
-          </Button>
+          {canEnterDashboard ? (
+            <Button
+              size="lg"
+              className="h-12 px-8 text-lg bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold shadow-lg shadow-blue-900/50"
+              onClick={() => {
+                pushAuthDebug("landing:enter-dashboard-click");
+                window.location.assign("/dashboard");
+              }}
+            >
+              进入工作台 <ArrowRight className="ml-2 w-4 h-4" />
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              className="h-12 px-8 text-lg bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold shadow-lg shadow-blue-900/50"
+              onClick={() => openAuth("register")}
+            >
+              立即免费开始 <ArrowRight className="ml-2 w-4 h-4" />
+            </Button>
+          )}
 
           <Button
             size="lg"
             variant="outline"
             className="h-12 px-8 text-lg border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-full"
+            onClick={() => openAuth("login")}
           >
-            查看演示视频
+            {canEnterDashboard ? "重新登录" : "查看演示视频"}
           </Button>
         </div>
 

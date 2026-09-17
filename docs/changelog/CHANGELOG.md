@@ -6,6 +6,12 @@
 
 ## 2026-09-17
 
+### 🔧 issue002 续修：禁止首页自动跳转（task015）
+
+- **现象**：一开首页就跳进「正在验证登录状态」白屏，来不及复制调试日志
+- **处理**：取消首页自动进 dashboard，改为「进入工作台」按钮；鉴权页/加载页可回首页；工作台改回按需 import + 15s 超时；NoteManager 懒加载
+- **手测**：`/?debugAuth=1` 应停在首页能看绿条；点「进入工作台」再进 dashboard
+
 ### 🔧 issue002 续修：去掉 dynamic/Suspense 卡死（task014）
 
 - **现象**：鉴权已通过（`admit:storage` / `dashboard:auth-ok`），卡在「正在加载工作台」；首页↔dashboard 循环

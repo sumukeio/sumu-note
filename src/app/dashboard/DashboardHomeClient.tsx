@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { pushAuthDebug } from "@/lib/auth-login-handoff";
@@ -13,7 +14,14 @@ import {
   type RecentNoteEntry,
 } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
-import NoteManager from "@/components/NoteManager";
+const NoteManager = dynamic(() => import("@/components/NoteManager"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex justify-center py-16">
+      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+    </div>
+  ),
+});
 import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
