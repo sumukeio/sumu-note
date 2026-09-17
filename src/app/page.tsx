@@ -7,7 +7,7 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
 import { readUserFromAuthStorage } from "@/lib/auth-utils";
 import { useToast } from "@/components/ui/use-toast";
-import { pushAuthDebug } from "@/lib/auth-login-handoff";
+import { pushAuthDebug, clearAuthDebugLog } from "@/lib/auth-login-handoff";
 
 function LandingPageInner() {
   const router = useRouter();
@@ -56,6 +56,7 @@ function LandingPageInner() {
             <Button
               className="bg-white text-black hover:bg-zinc-200 font-bold"
               onClick={() => {
+                clearAuthDebugLog();
                 pushAuthDebug("landing:enter-dashboard-click");
                 window.location.assign("/dashboard");
               }}
@@ -106,6 +107,7 @@ function LandingPageInner() {
               size="lg"
               className="h-12 px-8 text-lg bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold shadow-lg shadow-blue-900/50"
               onClick={() => {
+                clearAuthDebugLog();
                 pushAuthDebug("landing:enter-dashboard-click");
                 window.location.assign("/dashboard");
               }}

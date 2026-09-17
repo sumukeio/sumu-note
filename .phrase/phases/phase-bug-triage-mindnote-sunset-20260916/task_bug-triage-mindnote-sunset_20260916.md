@@ -62,9 +62,13 @@
   **验证**：`npm run type-check` 通过。  
   **影响范围**：`page.tsx`、`dashboard/page.tsx`、`AuthLoadingScreen.tsx`、`DashboardHomeClient.tsx`。
 
+- [x] **task016** 产出：issue002 续修——进文件夹懒加载超时；笔记拉取超时；清空调试日志。  
+  **验证**：`npm run type-check` 通过。  
+  **影响范围**：`NoteFolderLazy.tsx`、`NoteManager.tsx`、`DashboardHomeClient.tsx`、`AuthDebugPanel.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机复验——首页应能停留；点进入工作台后看是否出现 `dashboard-home:import-ok` / `mount`。  
+- 下一建议：真机点文件夹，看绿条 `note-manager:*`；成功则考虑关闭 issue002。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

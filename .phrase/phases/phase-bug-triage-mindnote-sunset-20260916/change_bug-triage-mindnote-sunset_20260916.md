@@ -3,6 +3,17 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task016 issue002 续修：进文件夹白屏
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `NoteFolderLazy.tsx` | 懒加载 NoteManager + 15s 超时 + 返回 |
+| Modify | `DashboardHomeClient.tsx` | 进文件夹走 Lazy；挂载预加载 |
+| Modify | `NoteManager.tsx` | fetch 超时；加载态可返回 |
+| Modify | `AuthDebugPanel.tsx` / handoff | 清空日志 |
+
+**验证**：type-check 通过。
+
 ## 2026-09-17 — task015 issue002 续修：禁止首页自动跳转
 
 | 动作 | 路径 | 说明 |

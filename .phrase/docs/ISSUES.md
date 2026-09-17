@@ -8,7 +8,7 @@
 | ID | 状态 | 级别 | 摘要 | 详情 |
 | :--- | :--- | :--- | :--- | :--- |
 | issue001 | [x] | P2 | 手机新建 Toast 挡标题 + 页态（task010） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue001----手机端新建-toast-挡标题--新建编辑页态不一致) |
-| issue002 | [ ] | P1 | iPhone 登录后进不去（task015 续修，待真机确认） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue002----iphone-8-plus-浏览器无法使用) |
+| issue002 | [ ] | P1 | iPhone 登录后进不去（task016：进文件夹仍待确认） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue002----iphone-8-plus-浏览器无法使用) |
 | issue003 | [x] | P1 | 最近打开：云端全局 + 手机点击（task005） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue003----手机端最近打开点击无反应--跨端预期偏差) |
 | issue004 | [x] | P2 | 自动标题字数上限 10（task007） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue004----自动标题字数上限用户期望-10) |
 | issue005 | [x] | P0 | 发布功能失败（task003 已修 `/p` + ADR/RLS SQL） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue005----发布功能失败) |
@@ -20,7 +20,7 @@
 
 ## 建议修复次序（尚未开修）
 
-1. issue002 真机确认 task015 → 勾选关闭  
+1. issue002 真机确认 task016（进文件夹）→ 勾选关闭  
 2. 或开启思维笔记下线实施
 
 ## 待讨论（未登记为 issue）

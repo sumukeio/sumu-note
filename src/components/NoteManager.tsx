@@ -49,6 +49,7 @@ import type { Note, FolderItem } from "@/types/note";
 import { TouchSensor, MouseSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { vibrateSelection, vibrateShort, vibrateSuccess, vibrateWarning } from "@/lib/haptics";
 import { recordRecentNote } from "@/lib/recent-notes";
+import { pushAuthDebug } from "@/lib/auth-login-handoff";
 
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
@@ -71,6 +72,10 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   const [notes, setNotes] = useState<Note[]>([]);
   const [subFolders, setSubFolders] = useState<FolderItem[]>([]); // 子文件夹列表
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    pushAuthDebug("note-manager:mount", { folderId, folderName });
+  }, [folderId, folderName]);
   
   // 编辑器状态
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
@@ -275,18 +280,36 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   // --- 获取数据 ---
   const fetchNotes = async () => {
       try {
-        // 缓存优先：先展示上次缓存的列表（首屏/离线更快）
-        const cached = await getCachedNotesList({ userId, folderId, showTrash });
+        pushAuthDebug("note-manager:fetch-start", { folderId, userId });
+        // 缓存优先：短超时，避免 IndexedDB 挂死挡住首屏
+        const cached = await Promise.race([
+          getCachedNotesList({ userId, folderId, showTrash }),
+          new Promise<null>((resolve) => {
+            window.setTimeout(() => resolve(null), 1_200);
+          }),
+        ]);
         if (cached && cached.length > 0) {
           setNotes(cached as any);
           setLoading(false);
         }
-        const data = await getNotes(userId, {
-          folder_id: folderId,
-          is_deleted: showTrash ? true : false,
-        });
+
+        const data = await Promise.race([
+          getNotes(userId, {
+            folder_id: folderId,
+            is_deleted: showTrash ? true : false,
+          }),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => {
+              pushAuthDebug("note-manager:fetch-timeout", { folderId });
+              reject(new Error("NOTES_FETCH_TIMEOUT"));
+            }, 10_000);
+          }),
+        ]);
         setNotes(data);
-        // 写入列表缓存（仅摘要字段也可以，这里直接缓存整行以便离线快速展示）
+        pushAuthDebug("note-manager:fetch-ok", {
+          folderId,
+          count: data.length,
+        });
         cacheNotesList({
           userId,
           folderId,
@@ -295,9 +318,18 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
         }).catch(() => {});
       } catch (e) {
         console.error("fetchNotes error:", e);
+        pushAuthDebug("note-manager:fetch-error", {
+          msg: e instanceof Error ? e.message : String(e),
+        });
+        if (e instanceof Error && e.message === "NOTES_FETCH_TIMEOUT") {
+          toast({
+            title: "加载笔记超时",
+            description: "网络较慢或连接异常，可返回上级后重试。",
+            variant: "destructive",
+          });
+        }
       } finally {
         setLoading(false);
-        // 禁止在此清空 selectedIds：与多选/移动弹窗重叠时会导致确认时选中已空、静默失败（issue009）
       }
   };
 
@@ -1876,7 +1908,17 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   // 辅助变量：判断当前选中是否全是置顶（用于 UI 显示）
   const allSelectedPinned = selectedIds.size > 0 && notes.filter(n => selectedIds.has(n.id)).every(n => n.is_pinned);
 
-  if (loading && view === 'list') return <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground"/></div>;
+  if (loading && view === 'list') {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 p-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">正在加载笔记…</p>
+        <Button variant="outline" size="sm" onClick={onBack}>
+          返回
+        </Button>
+      </div>
+    );
+  }
 
   if (view === 'editor') {
       return (

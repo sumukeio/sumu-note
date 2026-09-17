@@ -5,6 +5,7 @@ import {
   isAuthDebugEnabled,
   readAuthDebugLog,
   pushAuthDebug,
+  clearAuthDebugLog,
 } from "@/lib/auth-login-handoff";
 import { getAuthStorageMode } from "@/lib/supabase";
 
@@ -53,15 +54,32 @@ export default function AuthDebugPanel() {
       className="fixed bottom-0 left-0 right-0 z-[9999] max-h-[45vh] overflow-auto bg-black/95 text-green-300 text-[10px] leading-snug p-2 font-mono border-t-2 border-green-500 pointer-events-auto"
       data-auth-debug-panel
     >
-      <div className="text-green-100 mb-1 font-bold sticky top-0 bg-black/95">
-        Sumu Auth Debug · path 见下方首条 mount · storage=
-        {getAuthStorageMode()}
+      <div className="text-green-100 mb-1 font-bold sticky top-0 bg-black/95 flex items-center justify-between gap-2">
+        <span>
+          Sumu Auth Debug · storage={getAuthStorageMode()}
+        </span>
+        <button
+          type="button"
+          className="shrink-0 px-2 py-0.5 border border-green-700 text-green-200 rounded"
+          onClick={() => {
+            clearAuthDebugLog();
+            setLines([]);
+            pushAuthDebug("debug-panel:cleared", {
+              path: window.location.pathname,
+            });
+          }}
+        >
+          清空日志
+        </button>
       </div>
       {lines.length === 0 ? (
         <div>暂无日志（若刚跳转，等 1 秒…）</div>
       ) : (
         lines.map((l, i) => (
-          <div key={i} className="whitespace-pre-wrap break-all border-b border-green-900/50 py-0.5">
+          <div
+            key={i}
+            className="whitespace-pre-wrap break-all border-b border-green-900/50 py-0.5"
+          >
             {l}
           </div>
         ))

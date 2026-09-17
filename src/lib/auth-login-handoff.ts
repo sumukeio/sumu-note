@@ -100,6 +100,15 @@ export function pushAuthDebug(step: string, detail?: unknown): void {
   }
 }
 
+export function clearAuthDebugLog(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(DEBUG_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export function readAuthDebugLog(): {
   t: number;
   step: string;

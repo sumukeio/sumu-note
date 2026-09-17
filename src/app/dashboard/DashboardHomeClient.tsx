@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { pushAuthDebug } from "@/lib/auth-login-handoff";
@@ -14,14 +13,7 @@ import {
   type RecentNoteEntry,
 } from "@/lib/recent-notes";
 import { ModeToggle } from "@/components/ModeToggle";
-const NoteManager = dynamic(() => import("@/components/NoteManager"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex justify-center py-16">
-      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-    </div>
-  ),
-});
+import NoteFolderLazy, { preloadNoteManager } from "@/components/NoteFolderLazy";
 import FolderManager from "@/components/FolderManager"; // 引入
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +72,7 @@ function DashboardHomeClient({ user }: { user: User }) {
 
   useEffect(() => {
     pushAuthDebug("dashboard-home:mount", { userId: user.id });
+    preloadNoteManager();
   }, [user.id]);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [openingRecent, setOpeningRecent] = useState(false);
@@ -696,14 +689,14 @@ function DashboardHomeClient({ user }: { user: User }) {
             )}
           </section>
         ) : currentFolder ? (
-            // 👀 模式 B: 查看笔记
-            <NoteManager 
-                userId={user.id} 
-                folderId={currentFolder.id} 
+            // 👀 模式 B: 查看笔记（懒加载 NoteManager，避免 iOS 白屏死转圈）
+            <NoteFolderLazy
+                userId={user.id}
+                folderId={currentFolder.id}
                 folderName={currentFolder.name}
                 onBack={handleBack}
                 onEnterFolder={(id, name) => {
-                  // 进入子文件夹时，将当前文件夹推入栈
+                  pushAuthDebug("folder:enter-sub", { id, name });
                   if (currentFolder) {
                     setFolderStack(prev => [...prev, currentFolder]);
                   }
@@ -717,6 +710,7 @@ function DashboardHomeClient({ user }: { user: User }) {
             <FolderManager 
                 userId={user.id} 
                 onEnterFolder={(id, name) => {
+                  pushAuthDebug("folder:enter", { id, name });
                   // 从根目录进入文件夹时，清空栈
                   setFolderStack([]);
                   setCurrentFolder({ id, name });
