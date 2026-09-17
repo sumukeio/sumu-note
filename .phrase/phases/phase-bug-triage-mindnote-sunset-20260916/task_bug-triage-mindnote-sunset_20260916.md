@@ -74,9 +74,13 @@
   **验证**：`tests/lib/client-capability.test.ts` 通过；`npm run type-check` 通过。  
   **影响范围**：`client-capability.ts`、`LightFolderNotes.tsx`、`DashboardHomeClient.tsx`、`NoteFolderLazy.tsx`。
 
+- [x] **task019** 产出：轻量侧补齐——Dock 可见、子文件夹多选、新建文件夹、文件夹移动/删除。  
+  **验证**：`npm run type-check` 通过。  
+  **影响范围**：`LightFolderNotes.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：iPhone 验轻量 Dock/回收站；安卓或 PC 验完整编辑器 → 确认后关 issue002。  
+- 下一建议：iPhone 验新建文件夹/多选 Dock/子文件夹删除移动；安卓或 PC 验完整编辑器。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

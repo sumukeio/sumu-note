@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * iPhone/iPod 轻量文件夹（issue002 task018）
+ * iPhone/iPod 轻量文件夹（issue002 task018/019）
  * 砍：SegmentedEditor / 表格 / 格式条 / 发布 / 拖拽 Dock / wiki·标签补全 / 字数
- * 留：列表读写、Dock 点击、置顶、回收站、批量移动删除、同步提示、简化版本历史与列表缓存
+ * 留：笔记+子文件夹 创建/移动/删除、Dock 点击（高于调试条）、同步提示、版本历史、列表缓存
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
+  CheckSquare,
   FileText,
   Folder,
   FolderInput,
+  FolderPlus,
   History,
   Loader2,
   Pin,
@@ -43,6 +45,7 @@ import {
   setNotesPinned,
   updateNote,
 } from "@/lib/note-service";
+import { deleteFoldersCascade } from "@/lib/folder-service";
 import {
   createNoteVersion,
   getNoteVersions,
@@ -71,6 +74,26 @@ type LightFolderNotesProps = {
   onInitialNoteOpened?: () => void;
 };
 
+function SelectionBar({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-around gap-1 border rounded-lg bg-muted/40 px-1 py-1",
+        className
+      )}
+      data-light-selection-bar
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function LightFolderNotes({
   userId,
   folderId,
@@ -91,7 +114,12 @@ export default function LightFolderNotes({
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveTargets, setMoveTargets] = useState<FolderItem[]>([]);
   const [lastMoveTargetId, setLastMoveTargetId] = useState<string | null>(null);
@@ -102,11 +130,22 @@ export default function LightFolderNotes({
   const [versions, setVersions] = useState<NoteVersion[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderNameInput, setFolderNameInput] = useState("");
+  const [folderSaving, setFolderSaving] = useState(false);
+  const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
   const longPressTimer = useRef<number | null>(null);
   const ignoreClickRef = useRef(false);
   const lastLocalSaveAt = useRef(0);
 
-  const isSelectionMode = selectedIds.size > 0;
+  const isSelectionMode =
+    selectedNoteIds.size > 0 || selectedFolderIds.size > 0;
+  const selectionCount = selectedNoteIds.size + selectedFolderIds.size;
+
+  const clearSelection = () => {
+    setSelectedNoteIds(new Set());
+    setSelectedFolderIds(new Set());
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,7 +223,7 @@ export default function LightFolderNotes({
 
   useEffect(() => {
     pushAuthDebug("light-folder:mount", { folderId, folderName });
-    setSelectedIds(new Set());
+    clearSelection();
     setEditing(null);
     void load();
   }, [load, folderId, folderName]);
@@ -199,7 +238,6 @@ export default function LightFolderNotes({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialNoteId, loading, notes, showTrash]);
 
-  // 多端同步：编辑态订阅 UPDATE（简化：不接完整 saveRefs，靠本地保存时间窗过滤）
   useEffect(() => {
     if (!editing?.id) {
       setCloudBanner(false);
@@ -222,7 +260,6 @@ export default function LightFolderNotes({
           const row = payload.new as Note;
           setPendingCloud(row);
           setCloudBanner(true);
-          pushAuthDebug("light-folder:cloud-update", { noteId });
         }
       )
       .subscribe();
@@ -231,16 +268,60 @@ export default function LightFolderNotes({
     };
   }, [editing?.id]);
 
+  const toggleNote = (id: string) => {
+    setSelectedNoteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleFolder = (id: string) => {
+    setSelectedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const startLongPressNote = (id: string) => {
+    if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = window.setTimeout(() => {
+      ignoreClickRef.current = true;
+      setSelectedNoteIds(new Set([id]));
+      setSelectedFolderIds(new Set());
+      longPressTimer.current = null;
+    }, 450);
+  };
+
+  const startLongPressFolder = (id: string) => {
+    if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = window.setTimeout(() => {
+      ignoreClickRef.current = true;
+      setSelectedFolderIds(new Set([id]));
+      setSelectedNoteIds(new Set());
+      longPressTimer.current = null;
+    }, 450);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
   const openNote = (note: Note) => {
     if (ignoreClickRef.current) {
       ignoreClickRef.current = false;
       return;
     }
     if (isSelectionMode) {
-      toggleSelect(note.id);
+      toggleNote(note.id);
       return;
     }
-    pushAuthDebug("light-folder:open-note", { noteId: note.id });
     setEditing(note);
     setTitle(note.title || "");
     setContent(note.content || "");
@@ -253,34 +334,19 @@ export default function LightFolderNotes({
     });
   };
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const clearSelection = () => setSelectedIds(new Set());
-
-  const startLongPress = (id: string) => {
-    if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
-    longPressTimer.current = window.setTimeout(() => {
-      ignoreClickRef.current = true;
-      setSelectedIds(new Set([id]));
-      longPressTimer.current = null;
-    }, 450);
-  };
-
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      window.clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
+  const openSubFolder = (f: FolderItem) => {
+    if (ignoreClickRef.current) {
+      ignoreClickRef.current = false;
+      return;
     }
+    if (isSelectionMode) {
+      toggleFolder(f.id);
+      return;
+    }
+    onEnterFolder?.(f.id, f.name || "未命名文件夹");
   };
 
-  const handleCreate = async () => {
+  const handleCreateNote = async () => {
     if (creating || showTrash) return;
     setCreating(true);
     try {
@@ -301,6 +367,32 @@ export default function LightFolderNotes({
       });
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleCreateFolder = async () => {
+    const name = folderNameInput.trim();
+    if (!name || folderSaving) return;
+    setFolderSaving(true);
+    try {
+      const { data, error: err } = await supabase
+        .from("folders")
+        .insert({ user_id: userId, name, parent_id: folderId })
+        .select("id, name, parent_id, user_id, created_at")
+        .single();
+      if (err) throw err;
+      setSubFolders((prev) => [data as FolderItem, ...prev]);
+      setFolderDialogOpen(false);
+      setFolderNameInput("");
+      toast({ title: "已创建文件夹", description: name, variant: "success" });
+    } catch (e) {
+      toast({
+        title: "创建文件夹失败",
+        description: e instanceof Error ? e.message : "请重试",
+        variant: "destructive",
+      });
+    } finally {
+      setFolderSaving(false);
     }
   };
 
@@ -348,8 +440,7 @@ export default function LightFolderNotes({
     setHistoryOpen(true);
     setHistoryLoading(true);
     try {
-      const list = await getNoteVersions(editing.id);
-      setVersions(list.slice(0, 30));
+      setVersions((await getNoteVersions(editing.id)).slice(0, 30));
     } catch (e) {
       toast({
         title: "无法加载历史",
@@ -371,11 +462,12 @@ export default function LightFolderNotes({
     });
   };
 
-  const selectedNoteIds = () => [...selectedIds];
-
   const handlePin = async () => {
-    const ids = selectedNoteIds();
-    if (!ids.length) return;
+    const ids = [...selectedNoteIds];
+    if (!ids.length) {
+      toast({ title: "请先选中笔记再置顶" });
+      return;
+    }
     const allPinned = ids.every(
       (id) => notes.find((n) => n.id === id)?.is_pinned
     );
@@ -383,15 +475,10 @@ export default function LightFolderNotes({
     try {
       await setNotesPinned(ids, userId, next);
       setNotes((prev) =>
-        prev.map((n) =>
-          ids.includes(n.id) ? { ...n, is_pinned: next } : n
-        )
+        prev.map((n) => (ids.includes(n.id) ? { ...n, is_pinned: next } : n))
       );
       clearSelection();
-      toast({
-        title: next ? "已置顶" : "已取消置顶",
-        variant: "success",
-      });
+      toast({ title: next ? "已置顶" : "已取消置顶", variant: "success" });
     } catch (e) {
       toast({
         title: "置顶失败",
@@ -401,19 +488,17 @@ export default function LightFolderNotes({
     }
   };
 
-  const handleTrashOrRestore = async () => {
-    const ids = selectedNoteIds();
+  const handleTrashOrRestoreNotes = async () => {
+    const ids = [...selectedNoteIds];
     if (!ids.length) return;
     try {
-      if (showTrash) {
-        await setNotesDeleted(ids, userId, false);
-        toast({ title: "已恢复", variant: "success" });
-      } else {
-        await setNotesDeleted(ids, userId, true);
-        toast({ title: "已移入回收站", variant: "success" });
-      }
+      await setNotesDeleted(ids, userId, !showTrash);
       setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
-      clearSelection();
+      setSelectedNoteIds(new Set());
+      toast({
+        title: showTrash ? "已恢复笔记" : "笔记已移入回收站",
+        variant: "success",
+      });
     } catch (e) {
       toast({
         title: "操作失败",
@@ -423,8 +508,44 @@ export default function LightFolderNotes({
     }
   };
 
+  const handleDeleteFolders = async () => {
+    const ids = [...selectedFolderIds];
+    if (!ids.length) return;
+    try {
+      const result = await deleteFoldersCascade(userId, ids);
+      setSubFolders((prev) => prev.filter((f) => !ids.includes(f.id)));
+      setSelectedFolderIds(new Set());
+      setDeleteFolderOpen(false);
+      toast({
+        title: "已删除文件夹",
+        description: `${result.deletedFolderIds.length} 个文件夹；${result.softDeletedNoteIds.length} 条笔记进回收站`,
+        variant: "success",
+      });
+    } catch (e) {
+      toast({
+        title: "删除文件夹失败",
+        description: e instanceof Error ? e.message : "请重试",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteSelection = async () => {
+    if (selectedFolderIds.size > 0 && selectedNoteIds.size > 0) {
+      // 先删笔记再删文件夹
+      await handleTrashOrRestoreNotes();
+      setDeleteFolderOpen(true);
+      return;
+    }
+    if (selectedFolderIds.size > 0) {
+      setDeleteFolderOpen(true);
+      return;
+    }
+    await handleTrashOrRestoreNotes();
+  };
+
   const handlePurge = async () => {
-    const ids = selectedNoteIds();
+    const ids = [...selectedNoteIds];
     if (!ids.length) return;
     try {
       await deleteNotes(ids, userId);
@@ -442,6 +563,7 @@ export default function LightFolderNotes({
   };
 
   const openMove = async () => {
+    if (selectedNoteIds.size === 0 && selectedFolderIds.size === 0) return;
     const { data, error: err } = await supabase
       .from("folders")
       .select("id, name, parent_id, user_id, created_at")
@@ -455,20 +577,36 @@ export default function LightFolderNotes({
       });
       return;
     }
-    setMoveTargets((data || []) as FolderItem[]);
+    const blocked = new Set(selectedFolderIds);
+    setMoveTargets(
+      ((data || []) as FolderItem[]).filter(
+        (f) => f.id !== folderId && !blocked.has(f.id)
+      )
+    );
     setMoveOpen(true);
   };
 
   const confirmMove = async (targetFolderId: string | null) => {
-    const ids = selectedNoteIds();
-    if (!ids.length) return;
     setMoving(true);
     try {
-      await moveNotesToFolder(ids, userId, targetFolderId);
+      const noteIds = [...selectedNoteIds];
+      const folderIds = [...selectedFolderIds];
+      if (noteIds.length) {
+        await moveNotesToFolder(noteIds, userId, targetFolderId);
+        setNotes((prev) => prev.filter((n) => !noteIds.includes(n.id)));
+      }
+      if (folderIds.length) {
+        const { error: err } = await supabase
+          .from("folders")
+          .update({ parent_id: targetFolderId })
+          .in("id", folderIds)
+          .eq("user_id", userId);
+        if (err) throw err;
+        setSubFolders((prev) => prev.filter((f) => !folderIds.includes(f.id)));
+      }
       setLastMoveTargetId(
         targetFolderId === null ? MOVE_TARGET_ROOT : targetFolderId
       );
-      setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
       clearSelection();
       setMoveOpen(false);
       toast({ title: "已移动", variant: "success" });
@@ -499,7 +637,113 @@ export default function LightFolderNotes({
     }
   };
 
-  // —— 编辑态 ——
+  const renderSelectionActions = (compact?: boolean) => (
+    <>
+      {!showTrash && selectedNoteIds.size > 0 ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            compact && "flex-col h-auto py-1 gap-0.5",
+            "min-h-10"
+          )}
+          onClick={() => void handlePin()}
+        >
+          <Pin className="w-4 h-4" />
+          {!compact ? <span className="ml-1">置顶</span> : (
+            <span className="text-[10px]">置顶</span>
+          )}
+        </Button>
+      ) : null}
+      {!showTrash ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            compact && "flex-col h-auto py-1 gap-0.5",
+            "min-h-10"
+          )}
+          onClick={() => void openMove()}
+        >
+          <FolderInput className="w-4 h-4" />
+          {!compact ? <span className="ml-1">移动</span> : (
+            <span className="text-[10px]">移动</span>
+          )}
+        </Button>
+      ) : null}
+      {showTrash ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            compact && "flex-col h-auto py-1 gap-0.5",
+            "min-h-10"
+          )}
+          onClick={() => void handleTrashOrRestoreNotes()}
+          disabled={selectedNoteIds.size === 0}
+        >
+          <RotateCcw className="w-4 h-4" />
+          {!compact ? <span className="ml-1">恢复</span> : (
+            <span className="text-[10px]">恢复</span>
+          )}
+        </Button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            compact && "flex-col h-auto py-1 gap-0.5",
+            "min-h-10"
+          )}
+          onClick={() => void handleDeleteSelection()}
+        >
+          <Trash2 className="w-4 h-4" />
+          {!compact ? (
+            <span className="ml-1">
+              {selectedFolderIds.size > 0 && selectedNoteIds.size === 0
+                ? "删除"
+                : selectedFolderIds.size > 0
+                  ? "删除"
+                  : "回收站"}
+            </span>
+          ) : (
+            <span className="text-[10px]">
+              {selectedFolderIds.size > 0 ? "删除" : "回收站"}
+            </span>
+          )}
+        </Button>
+      )}
+      {showTrash ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            compact && "flex-col h-auto py-1 gap-0.5 text-destructive",
+            "min-h-10 text-destructive"
+          )}
+          onClick={() => setPurgeOpen(true)}
+          disabled={selectedNoteIds.size === 0}
+        >
+          <Trash2 className="w-4 h-4" />
+          {!compact ? <span className="ml-1">永久删</span> : (
+            <span className="text-[10px]">永久删</span>
+          )}
+        </Button>
+      ) : null}
+      <Button
+        variant="ghost"
+        size="sm"
+        className={cn(compact && "flex-col h-auto py-1 gap-0.5", "min-h-10")}
+        onClick={clearSelection}
+      >
+        <X className="w-4 h-4" />
+        {!compact ? <span className="ml-1">取消</span> : (
+          <span className="text-[10px]">取消</span>
+        )}
+      </Button>
+    </>
+  );
+
   if (editing) {
     return (
       <div className="flex flex-col gap-3 pb-24">
@@ -515,7 +759,6 @@ export default function LightFolderNotes({
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0"
             onClick={() => setEditing(null)}
             aria-label="返回列表"
           >
@@ -558,12 +801,13 @@ export default function LightFolderNotes({
           placeholder="开始书写…"
           className="min-h-[50vh] w-full rounded-md border border-border bg-background p-3 text-sm leading-relaxed resize-y"
         />
-
         <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>版本历史</DialogTitle>
-              <DialogDescription>选择一版载入到编辑区，再手动保存</DialogDescription>
+              <DialogDescription>
+                选择一版载入到编辑区，再手动保存
+              </DialogDescription>
             </DialogHeader>
             {historyLoading ? (
               <div className="py-8 flex justify-center">
@@ -597,10 +841,9 @@ export default function LightFolderNotes({
     );
   }
 
-  // —— 列表态 ——
   return (
-    <div className="flex flex-col gap-3 pb-28">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-3 pb-32">
+      <div className="flex items-center gap-1.5 flex-wrap">
         <Button
           variant="ghost"
           size="icon"
@@ -610,7 +853,9 @@ export default function LightFolderNotes({
         >
           <ArrowLeft className="w-5 h-5" />
         </Button>
-        <h2 className="flex-1 font-semibold truncate">{folderName}</h2>
+        <h2 className="flex-1 font-semibold truncate min-w-[4rem]">
+          {folderName}
+        </h2>
         <Button
           size="sm"
           variant={showTrash ? "default" : "outline"}
@@ -622,25 +867,73 @@ export default function LightFolderNotes({
           {showTrash ? "笔记" : "回收站"}
         </Button>
         {!showTrash ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setFolderNameInput("");
+                setFolderDialogOpen(true);
+              }}
+              disabled={loading}
+              title="新建文件夹"
+            >
+              <FolderPlus className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void handleCreateNote()}
+              disabled={creating || loading}
+              title="新建笔记"
+            >
+              {creating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+            </Button>
+          </>
+        ) : null}
+        {!isSelectionMode && !showTrash ? (
           <Button
             size="sm"
-            onClick={() => void handleCreate()}
-            disabled={creating || loading}
+            variant="outline"
+            onClick={() => {
+              // 进入空多选态：提示用户点选
+              if (notes[0]) setSelectedNoteIds(new Set([notes[0].id]));
+              else if (subFolders[0])
+                setSelectedFolderIds(new Set([subFolders[0].id]));
+              else
+                toast({
+                  title: "暂无内容可多选",
+                  description: "先新建笔记或文件夹",
+                });
+            }}
+            title="多选"
           >
-            {creating ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Plus className="w-4 h-4" />
-            )}
-            <span className="ml-1">新建</span>
+            <CheckSquare className="w-4 h-4" />
           </Button>
         ) : null}
       </div>
 
+      {/* 顶栏操作条：不被底部调试绿条挡住 */}
+      {isSelectionMode ? (
+        <SelectionBar>
+          <span className="text-xs text-muted-foreground px-2 shrink-0">
+            已选 {selectionCount}
+          </span>
+          {renderSelectionActions(false)}
+        </SelectionBar>
+      ) : (
+        <p className="text-[11px] text-muted-foreground px-0.5">
+          长按笔记/文件夹进入多选；或点右上角多选图标
+        </p>
+      )}
+
       {loading ? (
         <div className="flex flex-col items-center gap-3 py-16">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">正在加载笔记…</p>
+          <p className="text-xs text-muted-foreground">正在加载…</p>
           <Button variant="outline" size="sm" onClick={onBack}>
             返回
           </Button>
@@ -661,20 +954,48 @@ export default function LightFolderNotes({
             <section>
               <p className="text-xs text-muted-foreground mb-2">子文件夹</p>
               <ul className="space-y-1">
-                {subFolders.map((f) => (
-                  <li key={f.id}>
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 rounded-lg border border-border px-3 py-3 text-left hover:bg-muted/50 active:bg-muted touch-manipulation"
-                      onClick={() =>
-                        onEnterFolder?.(f.id, f.name || "未命名文件夹")
-                      }
-                    >
-                      <Folder className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <span className="truncate text-sm">{f.name}</span>
-                    </button>
-                  </li>
-                ))}
+                {subFolders.map((f) => {
+                  const selected = selectedFolderIds.has(f.id);
+                  return (
+                    <li key={f.id}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full flex items-center gap-3 rounded-lg border px-3 py-3 text-left touch-manipulation",
+                          selected
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted/50 active:bg-muted"
+                        )}
+                        onClick={() => openSubFolder(f)}
+                        onTouchStart={() => startLongPressFolder(f.id)}
+                        onTouchEnd={cancelLongPress}
+                        onTouchMove={cancelLongPress}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          toggleFolder(f.id);
+                        }}
+                      >
+                        {isSelectionMode ? (
+                          <span
+                            className={cn(
+                              "w-5 h-5 rounded border flex items-center justify-center shrink-0",
+                              selected
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "border-muted-foreground"
+                            )}
+                          >
+                            {selected ? <Check className="w-3 h-3" /> : null}
+                          </span>
+                        ) : (
+                          <Folder className="w-4 h-4 text-muted-foreground shrink-0" />
+                        )}
+                        <span className="truncate text-sm">
+                          {f.name || "未命名文件夹"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ) : null}
@@ -682,16 +1003,15 @@ export default function LightFolderNotes({
           <section>
             <p className="text-xs text-muted-foreground mb-2">
               {showTrash ? "回收站" : "笔记"}（{notes.length}）
-              {isSelectionMode ? ` · 已选 ${selectedIds.size}` : " · 长按多选"}
             </p>
             {notes.length === 0 ? (
               <p className="text-sm text-muted-foreground py-8 text-center">
-                {showTrash ? "回收站为空" : "还没有笔记，点右上角新建"}
+                {showTrash ? "回收站为空" : "还没有笔记"}
               </p>
             ) : (
               <ul className="space-y-1">
                 {notes.map((n) => {
-                  const selected = selectedIds.has(n.id);
+                  const selected = selectedNoteIds.has(n.id);
                   return (
                     <li key={n.id}>
                       <button
@@ -703,12 +1023,12 @@ export default function LightFolderNotes({
                             : "border-border hover:bg-muted/50 active:bg-muted"
                         )}
                         onClick={() => openNote(n)}
-                        onTouchStart={() => startLongPress(n.id)}
+                        onTouchStart={() => startLongPressNote(n.id)}
                         onTouchEnd={cancelLongPress}
                         onTouchMove={cancelLongPress}
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          toggleSelect(n.id);
+                          toggleNote(n.id);
                         }}
                       >
                         {isSelectionMode ? (
@@ -748,72 +1068,13 @@ export default function LightFolderNotes({
         </>
       )}
 
-      {/* Dock：仅点击，无拖拽 */}
+      {/* 底栏 Dock：z 高于调试条，避免被挡住 */}
       {isSelectionMode ? (
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-background/95 backdrop-blur px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around gap-1">
-          {!showTrash ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-col h-auto py-1 gap-0.5"
-              onClick={() => void handlePin()}
-            >
-              <Pin className="w-4 h-4" />
-              <span className="text-[10px]">置顶</span>
-            </Button>
-          ) : null}
-          {!showTrash ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-col h-auto py-1 gap-0.5"
-              onClick={() => void openMove()}
-            >
-              <FolderInput className="w-4 h-4" />
-              <span className="text-[10px]">移动</span>
-            </Button>
-          ) : null}
-          {showTrash ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-col h-auto py-1 gap-0.5"
-              onClick={() => void handleTrashOrRestore()}
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span className="text-[10px]">恢复</span>
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-col h-auto py-1 gap-0.5"
-              onClick={() => void handleTrashOrRestore()}
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="text-[10px]">回收站</span>
-            </Button>
-          )}
-          {showTrash ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-col h-auto py-1 gap-0.5 text-destructive"
-              onClick={() => setPurgeOpen(true)}
-            >
-              <Trash2 className="w-4 h-4" />
-              <span className="text-[10px]">永久删</span>
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="flex-col h-auto py-1 gap-0.5"
-            onClick={clearSelection}
-          >
-            <X className="w-4 h-4" />
-            <span className="text-[10px]">取消</span>
-          </Button>
+        <div
+          className="fixed bottom-0 left-0 right-0 z-[10050] border-t-2 border-primary/40 bg-background px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around gap-1 shadow-[0_-4px_20px_rgba(0,0,0,0.15)]"
+          data-light-dock
+        >
+          {renderSelectionActions(true)}
         </div>
       ) : null}
 
@@ -825,6 +1086,62 @@ export default function LightFolderNotes({
         busy={moving}
         onSelect={(id) => void confirmMove(id)}
       />
+
+      <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建文件夹</DialogTitle>
+            <DialogDescription>在「{folderName}」下创建子文件夹</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={folderNameInput}
+            onChange={(e) => setFolderNameInput(e.target.value)}
+            placeholder="文件夹名称"
+            autoFocus
+          />
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setFolderDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => void handleCreateFolder()}
+              disabled={!folderNameInput.trim() || folderSaving}
+            >
+              {folderSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "创建"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteFolderOpen} onOpenChange={setDeleteFolderOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除文件夹</DialogTitle>
+            <DialogDescription>
+              将删除选中的 {selectedFolderIds.size}{" "}
+              个文件夹及其子树；其中的笔记会进入回收站。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteFolderOpen(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDeleteFolders()}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={purgeOpen} onOpenChange={setPurgeOpen}>
         <DialogContent>
