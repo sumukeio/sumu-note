@@ -56,7 +56,8 @@ function LandingPageInner() {
         }
 
         if (!cancelled && session?.user) {
-          router.replace("/dashboard");
+          // 硬跳，避免与 dashboard 软跳/Suspense 打架形成首页↔工作台循环
+          window.location.replace("/dashboard");
         }
       } catch (e) {
         console.warn("Failed to check auth on landing:", e);

@@ -1,30 +1,15 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
-import dynamic from "next/dynamic";
+import { useEffect } from "react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import AuthLoadingScreen from "@/components/AuthLoadingScreen";
 import { pushAuthDebug } from "@/lib/auth-login-handoff";
-import { Loader2 } from "lucide-react";
+import DashboardHomeClient from "./DashboardHomeClient";
 
 /**
- * 鉴权必须在 Suspense(useSearchParams) 之外。
- * iOS 上整页包进 Suspense 时，searchParams 可能永不 resolve → 永久白屏转圈，
- * 且 useRequireAuth 根本不会执行（日志里看不到 requireAuth:*）。
+ * 鉴权通过后直接渲染工作台。
+ * 禁止：整页 dynamic() / 外包 Suspense(useSearchParams) —— iOS 上会永久「正在加载工作台」。
  */
-const DashboardHomeClient = dynamic(
-  () => import("./DashboardHomeClient"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        <p className="text-xs text-muted-foreground">正在加载工作台…</p>
-      </div>
-    ),
-  }
-);
-
 function DashboardAuthGate() {
   const { user, loading, authError, retry } = useRequireAuth();
 
@@ -44,18 +29,7 @@ function DashboardAuthGate() {
     );
   }
 
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
-          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">正在加载工作台…</p>
-        </div>
-      }
-    >
-      <DashboardHomeClient user={user} />
-    </Suspense>
-  );
+  return <DashboardHomeClient user={user} />;
 }
 
 export default function DashboardPage() {

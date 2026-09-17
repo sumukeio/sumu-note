@@ -54,9 +54,13 @@
   **验证**：`npm test -- --run tests/lib/auth-login-handoff.test.ts` 通过；`npm run type-check` 通过。  
   **影响范围**：`dashboard/page.tsx`、`DashboardHomeClient.tsx`、`layout.tsx`、`AuthBootBeacon.tsx`。
 
+- [x] **task014** 产出：issue002 续修——去掉 dynamic+Suspense；URL 深链改读 location.search；首页硬跳防循环。  
+  **验证**：`npm run type-check` 通过。  
+  **影响范围**：`dashboard/page.tsx`、`DashboardHomeClient.tsx`、`page.tsx`。
+
 ## 未开启（待人类确认下一 task）
 
-- 下一建议：真机复验 issue002（task013）；看绿条是否出现 `html-boot` path=/dashboard 与 `requireAuth:admit:*`。  
+- 下一建议：真机复验 issue002（task014）；绿条应有 `dashboard-home:mount`。  
 - **运维提醒**：
   - `docs/sql/allow_select_published_notes.sql`（公开页）
   - `docs/sql/create_user_recent_notes.sql`（最近打开云端）

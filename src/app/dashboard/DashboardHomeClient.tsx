@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { pushAuthDebug } from "@/lib/auth-login-handoff";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getNoteFolderId, getFolderAncestorStack, searchNotes } from "@/lib/note-service";
@@ -67,8 +68,11 @@ function getContentSnippet(content: string, query: string, maxLength: number = 1
 
 function DashboardHomeClient({ user }: { user: User }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { toast } = useToast();
+
+  useEffect(() => {
+    pushAuthDebug("dashboard-home:mount", { userId: user.id });
+  }, [user.id]);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [openingRecent, setOpeningRecent] = useState(false);
   const openingRecentRef = useRef(false);
@@ -210,29 +214,22 @@ function DashboardHomeClient({ user }: { user: User }) {
     }
   }, [user?.id, router]);
 
-  // 检测 URL 参数，如果有 note 参数，则自动进入对应的文件夹并打开编辑模式
+  // URL 深链：不用 useSearchParams（iOS Suspense 会卡死整页）
   useEffect(() => {
     if (!user?.id) return;
-    
-    const noteId = searchParams.get('note');
-    const folderId = searchParams.get('folder');
-    const searchParam = searchParams.get('search');
-    
-    // 构建当前参数的唯一标识
-    const currentParams = `${noteId || ''}-${folderId || ''}-${searchParam || ''}`;
-    
-    // 如果没有 URL 参数，重置处理标志
+    const params = new URLSearchParams(window.location.search);
+    const noteId = params.get("note");
+    const searchParam = params.get("search");
+    const currentParams = `${noteId || ""}-${searchParam || ""}`;
+
     if (!noteId && !searchParam) {
       processedParamsRef.current = "";
       return;
     }
-    
-    // 如果已经处理过相同的参数组合，不再重复处理
     if (processedParamsRef.current === currentParams) return;
-    
+
     if (noteId) {
       processedParamsRef.current = currentParams;
-      // 统一走 openNoteById：以 DB 中的 folder_id 为准，忽略陈旧 folder 参数
       void (async () => {
         try {
           await openNoteById(noteId);
@@ -242,15 +239,13 @@ function DashboardHomeClient({ user }: { user: User }) {
         }
       })();
     } else if (searchParam) {
-      // 只有搜索参数，设置到搜索框
       processedParamsRef.current = currentParams;
       setSearchQuery(searchParam);
-      // 延迟清除 URL 参数
       setTimeout(() => {
-        router.replace('/dashboard', { scroll: false });
+        router.replace("/dashboard", { scroll: false });
       }, 300);
     }
-  }, [user?.id, searchParams, router, openNoteById]);
+  }, [user?.id, router, openNoteById]);
 
   const handleSignOut = async () => {
     setLogoutConfirmOpen(false);

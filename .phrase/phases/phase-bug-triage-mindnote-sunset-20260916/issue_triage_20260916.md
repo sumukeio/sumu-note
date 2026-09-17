@@ -48,9 +48,9 @@
 | **实际** | 演进：静默进不去 → 登录成功后白屏转圈 → 软跳后留首页；调试条仅首页可见 |
 | **相关路径** | `AuthModal.tsx`；`useRequireAuth.tsx`；`auth-utils.ts`；`auth-login-handoff.ts`；`layout.tsx` |
 | **根因假设** | 软跳卡在路由过渡（dashboard 未挂载）；`getSession` 在 iOS 上挂死/空 |
-| **修复（task011–013 / 2026-09-17）** | 硬跳；handoff/storage 放行；根级调试条；**鉴权移出 Suspense**；主界面 dynamic 加载 |
-| **验证** | 单测通过；**待该机真机确认**后方可勾选 issue |
-| **待用户确认** | 先开 `/?debugAuth=1` 再登录；绿条应有 `html-boot` path=/dashboard、`requireAuth:admit:*`、`dashboard:auth-ok` |
+| **修复（task011–014 / 2026-09-17）** | 硬跳；handoff/storage 放行；根级调试；鉴权出 Suspense；**去掉 dynamic/useSearchParams 卡死** |
+| **验证** | 单测/type-check 通过；**待该机真机确认**后方可勾选 issue |
+| **待用户确认** | 绿条应有 `dashboard-home:mount` 并看到文件夹列表（不再停在「正在加载工作台」） |
 
 ---
 

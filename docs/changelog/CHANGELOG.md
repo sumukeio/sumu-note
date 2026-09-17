@@ -6,6 +6,12 @@
 
 ## 2026-09-17
 
+### 🔧 issue002 续修：去掉 dynamic/Suspense 卡死（task014）
+
+- **现象**：鉴权已通过（`admit:storage` / `dashboard:auth-ok`），卡在「正在加载工作台」；首页↔dashboard 循环
+- **处理**：静态渲染 `DashboardHomeClient`；废除 `useSearchParams`（改读 `location.search`）；首页已登录改为硬跳
+- **手测**：绿条应出现 `dashboard-home:mount` 并进入文件夹列表
+
 ### 🔧 issue002 续修：Suspense 卡死白屏（task013）
 
 - **现象**：`login:hard-nav` 后无任何 `requireAuth:*`；`/dashboard` 白屏转圈

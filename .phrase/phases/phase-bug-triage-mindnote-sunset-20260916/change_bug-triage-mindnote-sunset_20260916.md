@@ -3,6 +3,17 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-17 — task014 issue002 续修：去掉「正在加载工作台」卡死
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `dashboard/page.tsx` | 静态渲染 Home；去掉 dynamic/外包 Suspense |
+| Modify | `DashboardHomeClient.tsx` | 不用 `useSearchParams`；挂载打点 `dashboard-home:mount` |
+| Modify | `page.tsx` | 已登录自动进工作台改为 `location.replace` |
+
+**日志证据**：`dashboard:auth-ok` 后无 `dashboard-home:mount`，UI 停在 dynamic/Suspense fallback。  
+**验证**：type-check 通过。
+
 ## 2026-09-17 — task013 issue002 续修：鉴权移出 Suspense
 
 | 动作 | 路径 | 说明 |
