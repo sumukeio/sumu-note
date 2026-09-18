@@ -2,7 +2,9 @@
 
 > **权威性声明**：本文档是跨 IDE、CLI 及各类 AI Agent（Antigravity、Cursor、Codex 等）的总工程守则与治理标准。所有参与本项目的 Agent 和人类开发者必须无条件严格遵守。  
 > **核心宗旨**：消除代码幻觉，保证交付确定性，严守工程边界，做到「一次把事情做对，犯过的错绝不再犯」。  
-> **项目适配**：本文档自 DataAnalysisPlatform 通用模板本地化至 **Sumu Note**（Next.js + Supabase 笔记应用）。不适用条款见文末「暂缓启用」。
+> **项目适配**：本文档自公共模板本地化至 **Sumu Note**（Next.js + Supabase 笔记应用）。不适用条款见文末「暂缓启用」。  
+> **公共模板 SSOT**：`E:\DAS储备数据\经验积累\AGENTS.md`（跨项目共用铁律；可跨项目负向禁令回写彼处）  
+> **认知手册 SSOT**：`E:\DAS储备数据\经验积累\从VibeCoding到专业工程_AI协同认知升级手册.md`（仓库内镜像见 `docs/guides/`）
 
 ---
 
@@ -243,6 +245,9 @@ AI 在人机协同中是**「高执行力的工程副驾与盲区探查员」**�
 3. **禁止在未开 ADR 的情况下破坏性改动公开笔记链接语义、RLS 策略或 Storage 桶公开性**。
 4. **禁止用 `any` 掩盖跨编辑器（SegmentedEditor / MindNote / Todo）边界的数据结构分歧**——应先对齐类型或写适配层。
 5. **禁止在移动端编辑相关改动中忽略 `--vvh` / `visualViewport` 与键盘遮挡问题**（历史多次踩坑）。
+6. **禁止在真机/WebView「白屏或永久转圈」场景下无 step 时间线证据就连续改业务代码**：须启用关键路径打点 + 可复制日志看板（或等价证据），按最后停留点归因。完整 SOP：[`docs/guides/CLIENT_DEBUG_PLAYBOOK.md`](docs/guides/CLIENT_DEBUG_PLAYBOOK.md)。
+7. **禁止把调试开关做成长期后门或鉴权旁路**：`?debug*=1` 仅 session 级排障；**不参与登录判定**；排障结束必须关闭；日志禁止写入 Token/密码。
+8. **禁止对可能永不结束的动态 `import()` / `getSession` 只转圈不打点**：必须有超时 step（如 `*:import-timeout`）与可见失败/降级入口；仅有 `start` 无 `ok`/`timeout` 视为未完成排障。
 
 ---
 

@@ -26,6 +26,11 @@
 4. **轻量侧 UX**：多选顶栏四格图标、去掉挡 Toast 的底栏 Dock、chrome `select-none`、正文 `select-text`。
 5. **调试卫生**：`?debugAuth=1` 仅 **sessionStorage**（关标签失效）；**不参与鉴权、不能绕过登录**；排障完用 `/?debugAuth=0`。
 
+## 调试卫生
+
+临时排障：`/?debugAuth=1`（session，关标签失效）；关闭 `/?debugAuth=0`。  
+**不参与鉴权。** 完整排障心法见 [`CLIENT_DEBUG_PLAYBOOK.md`](./CLIENT_DEBUG_PLAYBOOK.md)。
+
 ## 能力探测
 
 - 代码：`src/lib/client-capability.ts`

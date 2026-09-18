@@ -4,6 +4,23 @@
 > 本文档记录项目的重要更新和修复。**只追加、不覆盖。**  
 > 路径兼容入口：[`docs/CHANGELOG.md`](../CHANGELOG.md)
 
+## 2026-09-18
+
+### 📚 跨项目经验资产独立落盘
+
+- **SSOT 目录**：`E:\DAS储备数据\经验积累\`
+  - 认知手册（完全通用）
+  - 公共 `AGENTS.md` 模板（各仓库另有本地化版）
+  - 目录 `README.md` 说明出库/入库
+- 本仓库：根 `AGENTS.md` 与手册镜像文首已链到该目录
+
+### 📚 沉淀：客户端不可见失败排障 Playbook（A/B/E）
+
+- **A** 新建 [`docs/guides/CLIENT_DEBUG_PLAYBOOK.md`](../guides/CLIENT_DEBUG_PLAYBOOK.md)：六步思路、看板/复制/清空、信标、超时、handoff、双轨、Checklist
+- **B** 认知手册第九章矩阵 #13 +「第九章附」SOP + 冷启动 Checklist 5b
+- **E** `AGENTS.md` 负向禁令 6–8（无证据不连改 / 调试非鉴权旁路 / import 必须超时打点）
+- **路由**：`docs/README.md` 已挂索引
+
 ## 2026-09-17
 
 ### 🔧 砍掉首页「进入工作台」（task022）

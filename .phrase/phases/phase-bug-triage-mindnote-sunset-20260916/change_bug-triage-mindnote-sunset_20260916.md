@@ -3,6 +3,15 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-09-18 — 文档：CLIENT_DEBUG_PLAYBOOK + 手册/AGENTS 回写
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `docs/guides/CLIENT_DEBUG_PLAYBOOK.md` | 真机不可见失败排障完整 Playbook |
+| Modify | 认知升级手册 | 第九章 #13、第九章附、Checklist 5b |
+| Modify | `AGENTS.md` | 负向禁令 6–8 |
+| Modify | `docs/README.md` / CHANGELOG / 结案指南 | 路由与交叉链接 |
+
 ## 2026-09-17 — task022 砍掉首页「进入工作台」
 
 | 动作 | 路径 | 说明 |
