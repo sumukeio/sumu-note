@@ -90,6 +90,18 @@
   **验证**：`npm run type-check` 通过。  
   **影响范围**：`src/app/page.tsx`、结案指南、MOBILE_TESTING、CHANGELOG。
 
+- [x] **task023** 产出：修复 issue011 编辑态页内查找——全文偏移映射、`SegmentedEditor.revealMatch` 定位/选区标黄、上下翻接线；回归测试与文档。  
+  **验证**：`npx vitest run tests/lib/segmented-editor-search.test.ts` 通过；`npm run type-check` 通过。  
+  **影响范围**：`segmented-editor-search.ts`、`SegmentedEditor.tsx`、`NoteManager.tsx`、`NoteEditor.tsx`、`FindReplaceDialog.tsx`、ISSUE/CHANGELOG。
+
+- [x] **task024** 产出：修复 issue012 查找视口跟焦——外层容器滚到选区中线、`preventScroll`、查找态抑浮动工具栏、查找条 sticky/inset；滚动增量单测。  
+  **验证**：`npx vitest run tests/lib/segmented-editor-search.test.ts` 12 passed；`npm run type-check` 通过。  
+  **影响范围**：`segmented-editor-search.ts`、`SegmentedEditor.tsx`、`FindReplaceDialog.tsx`、`NoteEditor.tsx`、ISSUE/CHANGELOG。
+
+- [x] **task025** 产出：修复 issue013——Realtime 自更新过滤纯函数、pending timeout 按 token 清理、同指纹跳过 setContent/Toast；回归测试与文档。  
+  **验证**：`npx vitest run tests/lib/note-realtime-filter.test.ts` 通过；`npm run type-check` 通过。  
+  **影响范围**：`note-realtime-filter.ts`、`useNoteRealtime.ts`、`useNoteSave.ts`、`NoteManager.tsx`、ISSUE/CHANGELOG。
+
 ## 未开启（待人类确认下一 task）
 
 - 下一建议：**思维笔记下线实施**（另开 phase，产品已 ADR）。  

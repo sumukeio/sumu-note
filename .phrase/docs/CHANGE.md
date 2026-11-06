@@ -11,6 +11,9 @@
 
 | 日期 | 阶段 | 摘要 | 详情 |
 | :--- | :--- | :--- | :--- |
+| 2026-11-06 | phase-bug-triage-mindnote-sunset-20260916 | task025：issue013 Realtime 误覆盖/光标跳文末 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
+| 2026-11-06 | phase-bug-triage-mindnote-sunset-20260916 | task024：issue012 查找视口跟焦/消抖 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
+| 2026-11-06 | phase-bug-triage-mindnote-sunset-20260916 | task023：issue011 页内查找定位/标黄 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-18 | phase-bug-triage-mindnote-sunset-20260916 | CLIENT_DEBUG_PLAYBOOK + 手册/AGENTS | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | task022：砍掉首页「进入工作台」 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-09-17 | phase-bug-triage-mindnote-sunset-20260916 | 澄清：拆包/轻量增量动机与受众 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |

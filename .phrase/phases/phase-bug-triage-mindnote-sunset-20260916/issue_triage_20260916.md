@@ -162,6 +162,55 @@
 | **验证** | `tests/lib/folder-utils.test.ts` 通过；type-check 通过 |
 ---
 
+## issue011 [x] 编辑态页内查找不定位/不标黄/上下翻无反应
+
+| 项 | 内容 |
+| :--- | :--- |
+| **级别** | P1 |
+| **环境** | 完整轨（NoteManager + SegmentedEditor）；安卓/PC/iPad。**非** iPhone 轻量双轨问题 |
+| **期望** | Ctrl+F / 查找面板：匹配项标黄选区、滚动到正文位置；上翻/下翻切换当前命中 |
+| **实际** | 对话框匹配计数可更新，正文不定位、无标黄、上下翻看似无反应 |
+| **相关路径** | `FindReplaceDialog.tsx`；`NoteManager.handleFind`；`NoteEditor.tsx`；`SegmentedEditor.tsx`；`search-utils.ts` |
+| **根因** | 迁到 SegmentedEditor 后仍按单 `textarea` + `editorRef.setSelectionRange` 实现；`editorRef` 从未挂载（恒 null）；`matches`/`currentMatchIndex` 传入 NoteEditor 后未消费；编辑器无 `revealMatch` API |
+| **说明** | 与 issue002（iPhone 8P 双轨降级）无关；轻量轨本无查找面板。文档曾写「高亮不精确」，实际定位链路已断 |
+| **修复（task023 / 2026-11-06）** | 新增 `locateMatchInContent` 全文偏移→段映射；`SegmentedEditor.revealMatch` + 选区黄标；`handleFind` 接线；FindReplace 快捷键闭包补 `currentMatchIndex` |
+| **验证** | `npx vitest run tests/lib/segmented-editor-search.test.ts` 9 passed；`npm run type-check` 通过 |
+| **Resolved At/By** | 2026-11-06 / task023 |
+
+---
+
+## issue012 [x] 页内查找视口不跟焦 + 上下翻抖动
+
+| 项 | 内容 |
+| :--- | :--- |
+| **级别** | P1 |
+| **环境** | 完整轨编辑态；task023 之后复现 |
+| **期望** | 上翻/下翻时，外层笔记视口把当前命中滚到可见中区；切换过程无明显抖动 |
+| **实际** | 已标黄可选中，但视口常停在屏幕偏底部；上下翻时正文抖动 |
+| **相关路径** | `SegmentedEditor.applyTextSelection`；`editorScrollContainerRef`；`FindReplaceDialog`；`FloatingToolbar` |
+| **根因** | textarea `overflow-hidden` 撑高后对整块 `scrollIntoView`/`scrollTop` 无效；未滚外层容器；`focus()` 默认滚焦 + 查找选区触发浮动工具栏抢布局 |
+| **修复（task024 / 2026-11-06）** | `scrollContainerToTextareaOffset` 滚外层中线；`focus({preventScroll:true})`；查找态抑工具栏；查找条 `sticky` + `data-find-replace-bar` 计入 topInset |
+| **验证** | `tests/lib/segmented-editor-search.test.ts` 12 passed（含 `computeScrollDeltaToCenter`）；type-check 通过 |
+| **Resolved At/By** | 2026-11-06 / task024 |
+
+---
+
+## issue013 [x] 编辑中误报「已同步云端更新」导致光标跳文末
+
+| 项 | 内容 |
+| :--- | :--- |
+| **级别** | P1 |
+| **环境** | 完整轨编辑态；查找通常关闭；偶发 |
+| **期望** | 自己自动保存的 Realtime 回声不覆盖正文、不弹「已同步云端更新」、光标保持 |
+| **实际** | 打字中偶发光标到文末；几乎同时右下角 Toast「已同步云端更新」 |
+| **相关路径** | `useNoteRealtime.ts`；`useNoteSave.ts`；`NoteManager.handleAutoSyncFromCloud`；`SegmentedEditor` 外部 `setContent` |
+| **根因** | 自更新过滤不稳（pending 被旧 save 的 timeout 误清、仅按 updated_at 字符串匹配）；误判后 `setContent` 重解析 → 光标掉文末 |
+| **修复（task025 / 2026-11-06）** | `decideRealtimeNoteUpdate` 指纹优先过滤；pending timeout 按 token 清理；同指纹/近期自写指纹跳过 `setContent` 与 Toast |
+| **验证** | `tests/lib/note-realtime-filter.test.ts` 6 passed；type-check 通过 |
+| **Resolved At/By** | 2026-11-06 / task025 |
+
+---
+
 ## 根因簇一览
 
 | 簇 | Issues | 说明 |
@@ -174,6 +223,9 @@
 | 编辑态统计与链接 UX | 007、008 | 需部分产品拍板 |
 | 兼容性 | 002 | 需环境信息 |
 | 产品参数 | 004 | 标题长度 |
+| 编辑器查找接线断裂 | 011 | SegmentedEditor 迁移遗留 |
+| 查找视口跟焦 | 012 | 滚错对象（整块 textarea vs 外层容器） |
+| Realtime 自写误覆盖 | 013 | 保存回声 → Toast + setContent |
 
 ## 思维笔记下线 — 代码触及面（实施阶段再用，本期不改）
 

@@ -3,6 +3,48 @@
 > **状态**：[权威/现行]  
 > 按时间倒序追加。
 
+## 2026-11-06 — task025 issue013 误报「已同步云端更新」/ 光标跳文末
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `note-realtime-filter.ts` + 测试 | `decideRealtimeNoteUpdate`：指纹优先、时间近邻忽略 |
+| Modify | `useNoteRealtime.ts` | 改用纯函数过滤 |
+| Modify | `useNoteSave.ts` | pending timeout 按 save token 清理；成功后立即 `isSaving=false` |
+| Modify | `NoteManager.tsx` | 同指纹/近期自写指纹：不 `setContent`、不 Toast |
+| Modify | ISSUES / triage / CHANGELOG | issue013 |
+
+**根因**：自己保存 Realtime 回声被当成云端更新 → `setContent` 重挂段 → 光标文末 + Toast。  
+**验证**：vitest filter 6 + search 12 passed；type-check 通过。
+
+## 2026-11-06 — task024 issue012 查找视口跟焦 / 消抖
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Modify | `segmented-editor-search.ts` | `computeScrollDeltaToCenter` / `scrollContainerToTextareaOffset` / 表格中心滚 |
+| Modify | `SegmentedEditor.tsx` | `focus({preventScroll})`；滚外层容器；查找态抑 FloatingToolbar |
+| Modify | `FindReplaceDialog.tsx` | `sticky` + `data-find-replace-bar` |
+| Modify | `NoteEditor.tsx` | 滚动容器加 `relative` |
+| Modify | 测试 / ISSUES / triage / CHANGELOG | issue012 + 滚动增量断言 |
+
+**根因**：对撑高 `overflow-hidden` textarea 做 `scrollIntoView`，未滚 `editorScrollContainerRef`。  
+**验证**：vitest 12 passed；type-check 通过。
+
+## 2026-11-06 — task023 issue011 编辑态页内查找定位/标黄
+
+| 动作 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| Add | `src/lib/segmented-editor-search.ts` | `buildSegmentRanges` / `locateMatchInContent`：全文 Match → 段索引/本地选区 |
+| Add | `tests/lib/segmented-editor-search.test.ts` | 9 条回归（文本/表格/多命中/非法区间） |
+| Modify | `SegmentedEditor.tsx` | `forwardRef` + `revealMatch`；查找态 `::selection` 黄标；表格容器 ref |
+| Modify | `NoteManager.tsx` | 弃用死 `editorRef`；`handleFind` → `segmentedEditorRef.revealMatch` |
+| Modify | `NoteEditor.tsx` | 下传 ref / `findSelectionActive` |
+| Modify | `FindReplaceDialog.tsx` | 快捷键依赖补 `currentMatchIndex`，避免上下翻闭包陈旧 |
+| Modify | `ISSUES.md` / `issue_triage_*` / `task_*` / CHANGELOG / 集成说明 | 登记 issue011 与解决方案 |
+
+**根因**：SegmentedEditor 迁移后查找仍绑未挂载的单 textarea `editorRef`；matches 未消费。  
+**方案**：偏移映射 + imperative 定位选区；非 iPhone 双轨降级。  
+**验证**：vitest 9 passed；type-check 通过。
+
 ## 2026-09-18 — 文档：CLIENT_DEBUG_PLAYBOOK + 手册/AGENTS 回写
 
 | 动作 | 路径 | 说明 |

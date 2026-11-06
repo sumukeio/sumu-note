@@ -95,7 +95,21 @@ export default function FindReplaceDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findQuery, text, caseSensitive, cursorPosition]);
 
-  // 处理键盘事件
+  const handleNext = () => {
+    if (matches.length === 0) return;
+    const nextIndex = getNextMatchIndex(currentMatchIndex, matches);
+    setCurrentMatchIndex(nextIndex);
+    onFind(matches, nextIndex);
+  };
+
+  const handlePrevious = () => {
+    if (matches.length === 0) return;
+    const prevIndex = getPreviousMatchIndex(currentMatchIndex, matches);
+    setCurrentMatchIndex(prevIndex);
+    onFind(matches, prevIndex);
+  };
+
+  // 处理键盘事件（依赖 currentMatchIndex，避免上下翻闭包陈旧）
   useEffect(() => {
     if (!isOpen) return;
 
@@ -106,9 +120,6 @@ export default function FindReplaceDialog({
         onClose();
         return;
       }
-
-      // Ctrl+F 或 Cmd+F 打开查找（由父组件处理）
-      // Ctrl+H 或 Cmd+H 打开替换（由父组件处理）
 
       // Enter 键：在查找模式下跳转到下一个，在替换模式下执行替换
       if (e.key === "Enter" && !e.shiftKey) {
@@ -151,21 +162,9 @@ export default function FindReplaceDialog({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, matches, isReplaceMode, onClose]);
-
-  const handleNext = () => {
-    if (matches.length === 0) return;
-    const nextIndex = getNextMatchIndex(currentMatchIndex, matches);
-    setCurrentMatchIndex(nextIndex);
-    onFind(matches, nextIndex);
-  };
-
-  const handlePrevious = () => {
-    if (matches.length === 0) return;
-    const prevIndex = getPreviousMatchIndex(currentMatchIndex, matches);
-    setCurrentMatchIndex(prevIndex);
-    onFind(matches, prevIndex);
-  };
+    // handleNext/Previous/Replace 闭包依赖 matches / currentMatchIndex / mode
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, matches, currentMatchIndex, isReplaceMode, onClose, findQuery, replaceQuery, caseSensitive, text]);
 
   const handleReplace = () => {
     if (matches.length === 0 || currentMatchIndex < 0) return;
@@ -194,7 +193,10 @@ export default function FindReplaceDialog({
   if (!isOpen) return null;
 
   return (
-    <div className="absolute top-0 left-0 right-0 z-50 bg-background border-b border-border shadow-lg">
+    <div
+      data-find-replace-bar
+      className="sticky top-0 left-0 right-0 z-50 bg-background border-b border-border shadow-lg"
+    >
       {/* 移动端：查找为主，替换按需展开 */}
       <div className="flex flex-col sm:hidden gap-2 p-2">
         {/* 第一行：查找输入框 + 基本控制 */}

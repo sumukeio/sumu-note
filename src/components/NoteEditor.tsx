@@ -37,7 +37,9 @@ import { Input } from "@/components/ui/input";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import NoteStats from "@/components/NoteStats";
 import FindReplaceDialog from "@/components/FindReplaceDialog";
-import SegmentedEditor from "@/components/SegmentedEditor";
+import SegmentedEditor, {
+  type SegmentedEditorHandle,
+} from "@/components/SegmentedEditor";
 import { cn } from "@/lib/utils";
 import { shouldStartInMobileReadingMode } from "@/lib/mobile-editor-entry";
 import type { Note } from "@/types/note";
@@ -142,6 +144,8 @@ export interface NoteEditorProps {
   /** 由 NoteManager 传入，用于保存/恢复滚动位置 */
   editorScrollContainerRef: React.RefObject<HTMLDivElement | null>;
   savedScrollTopRef: React.MutableRefObject<number>;
+  /** 页内查找定位（SegmentedEditor.revealMatch） */
+  segmentedEditorRef?: React.RefObject<SegmentedEditorHandle | null>;
   /** 由 NoteManager 传入，用于点击外部关闭更多菜单 */
   moreMenuRef?: React.RefObject<HTMLDivElement | null>;
   moreButtonRef?: React.RefObject<HTMLButtonElement | null>;
@@ -218,6 +222,7 @@ export function NoteEditor(props: NoteEditorProps) {
     onExitMobileWritingMode,
     editorScrollContainerRef,
     savedScrollTopRef,
+    segmentedEditorRef,
     moreMenuRef: moreMenuRefProp,
     moreButtonRef: moreButtonRefProp,
     moreMenuPortalRef: moreMenuPortalRefProp,
@@ -708,7 +713,8 @@ export function NoteEditor(props: NoteEditorProps) {
           ref={editorScrollContainerRef}
           className={cn(
             // 移动端避免“嵌套滚动容器”导致键盘/输入时回顶：整页只保留一个主要滚动容器
-            "flex-1 mx-auto w-full flex flex-col overflow-y-auto overscroll-contain min-h-0 pb-20 sm:pb-0 note-content",
+            // relative：查找条 sticky 相对本容器；revealMatch 滚的也是本容器
+            "relative flex-1 mx-auto w-full flex flex-col overflow-y-auto overscroll-contain min-h-0 pb-20 sm:pb-0 note-content",
             zenMode
               ? "max-w-4xl px-8 py-12"
               : "max-w-full sm:max-w-3xl md:max-w-[var(--note-max-width)] p-3 sm:p-4 md:p-8"
@@ -891,6 +897,7 @@ export function NoteEditor(props: NoteEditorProps) {
                 )}
               >
                 <SegmentedEditor
+                  ref={segmentedEditorRef}
                   content={content}
                   onChange={onSegmentedEditorChange}
                   placeholder={isMobile ? "向下输入正文，输入 / 可插入内容…" : "开始输入内容 (支持 Markdown，输入 [[ 以引用其他笔记)..."}
@@ -907,6 +914,7 @@ export function NoteEditor(props: NoteEditorProps) {
                   userId={userId}
                   noteId={currentNote?.id ?? undefined}
                   scrollContainerRef={editorScrollContainerRef as unknown as React.RefObject<HTMLElement | null>}
+                  findSelectionActive={isFindReplaceOpen}
                 />
               </div>
               {linkMenuOpen && linkCandidates.length > 0 && (

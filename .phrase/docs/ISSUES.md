@@ -17,10 +17,13 @@
 | issue008 | [x] | P2 | 正文链接防误触（task008） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue008----正文链接点击易误触弹窗待产品拍板) |
 | issue009 | [x] | P1 | 移动功能双端无反应（task006） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue009----移动功能双端均无反应) |
 | issue010 | [x] | P0 | 删除文件夹 `folders_parent_id_fkey`（task002 已修） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue010----删除文件夹违反-folders_parent_id_fkey) |
+| issue011 | [x] | P1 | 编辑态页内查找不定位/不标黄/上下翻无反应（task023） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue011-x-编辑态页内查找不定位不标黄上下翻无反应) |
+| issue012 | [x] | P1 | 页内查找视口不跟焦 + 上下翻抖动（task024） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue012-x-页内查找视口不跟焦--上下翻抖动) |
+| issue013 | [x] | P1 | 编辑中误报「已同步云端更新」导致光标跳文末（task025） | [分诊](../phases/phase-bug-triage-mindnote-sunset-20260916/issue_triage_20260916.md#issue013-x-编辑中误报已同步云端更新导致光标跳文末) |
 
 ## 建议修复次序（尚未开修）
 
-1. 本轮分诊 issue001–010 均已关闭；后续按需新开 issue  
+1. issue001–013 均已关闭；后续按需新开 issue  
 2. 或开启思维笔记下线实施（见 ADR）
 
 ## 待讨论（未登记为 issue）

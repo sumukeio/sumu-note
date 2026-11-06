@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { Plus, X, Trash2, Minus, XCircle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
@@ -22,6 +29,12 @@ import {
   isSmartLinkToken,
   shouldOpenLinkConfirmOnEditClick,
 } from "@/lib/editor-link-gesture";
+import {
+  locateMatchInContent,
+  scrollContainerToElementCenter,
+  scrollContainerToTextareaOffset,
+  type SearchMatchRange,
+} from "@/lib/segmented-editor-search";
 
 interface SegmentedEditorProps {
   content: string;
@@ -40,7 +53,14 @@ interface SegmentedEditorProps {
   noteId?: string;
   /** 虚拟滚动时使用的滚动容器（外层唯一滚动容器） */
   scrollContainerRef?: React.RefObject<HTMLElement | null>;
+  /** 查找面板打开时，将选区样式标为黄色 */
+  findSelectionActive?: boolean;
 }
+
+/** 页内查找定位 API（NoteManager.handleFind 调用） */
+export type SegmentedEditorHandle = {
+  revealMatch: (match: SearchMatchRange) => boolean;
+};
 
 interface Segment {
   type: "text" | "table";
@@ -54,21 +74,27 @@ interface Segment {
  * 分段编辑器
  * 将内容分为文本段和表格段，表格直接渲染为 HTML table
  */
-export default function SegmentedEditor({
-  content,
-  onChange,
-  placeholder,
-  className,
-  textareaClassName,
-  onInsertTable,
-  isMobileWritingMode = false,
-  onRequestInsertImage,
-  userId,
-  noteId,
-  scrollContainerRef,
-}: SegmentedEditorProps) {
+const SegmentedEditor = forwardRef<SegmentedEditorHandle, SegmentedEditorProps>(function SegmentedEditor(
+  {
+    content,
+    onChange,
+    placeholder,
+    className,
+    textareaClassName,
+    onInsertTable,
+    isMobileWritingMode = false,
+    onRequestInsertImage,
+    userId,
+    noteId,
+    scrollContainerRef,
+    findSelectionActive = false,
+  },
+  ref
+) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const textareaRefs = useRef<Map<number, HTMLTextAreaElement>>(new Map());
+  const tableContainerRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const plainTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingUpdateRef = useRef<string | null>(null);
   const flushScheduledRef = useRef(false);
   const [linkConfirmOpen, setLinkConfirmOpen] = useState(false);
@@ -1106,14 +1132,133 @@ export default function SegmentedEditor({
     },
   });
 
+  /** 查找条高度：避免命中被顶栏挡住 */
+  const getFindTopInset = useCallback(() => {
+    if (typeof document === "undefined") return 0;
+    const bar = document.querySelector("[data-find-replace-bar]") as HTMLElement | null;
+    return bar?.getBoundingClientRect().height ?? 0;
+  }, []);
+
+  const applyTextSelection = useCallback(
+    (el: HTMLTextAreaElement, localStart: number, localEnd: number) => {
+      const start = Math.max(0, Math.min(localStart, el.value.length));
+      const end = Math.max(start, Math.min(localEnd, el.value.length));
+      // 禁止浏览器默认滚焦，改由外层容器精确跟焦
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+      el.setSelectionRange(start, end);
+
+      // 查找态：清掉浮动工具栏，避免选区触发布局抖动
+      setSelectedText("");
+      setToolbarPosition(null);
+
+      const container = scrollContainerRef?.current ?? null;
+      if (container) {
+        scrollContainerToTextareaOffset({
+          container,
+          textarea: el,
+          offset: start,
+          topInset: getFindTopInset(),
+        });
+      }
+    },
+    [scrollContainerRef, getFindTopInset]
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      revealMatch: (match: SearchMatchRange) => {
+        const loc = locateMatchInContent(content, match);
+        if (!loc) return false;
+
+        if (loc.kind === "plain") {
+          const el = plainTextareaRef.current;
+          if (!el) return false;
+          applyTextSelection(el, loc.localStart, loc.localEnd);
+          return true;
+        }
+
+        const revealText = (segmentIndex: number, localStart: number, localEnd: number) => {
+          const el = textareaRefs.current.get(segmentIndex);
+          if (!el) return false;
+          applyTextSelection(el, localStart, localEnd);
+          activeTextareaIndexRef.current = segmentIndex;
+          return true;
+        };
+
+        const revealTable = (segmentIndex: number) => {
+          const el = tableContainerRefs.current.get(segmentIndex);
+          if (!el) return false;
+          const container = scrollContainerRef?.current ?? null;
+          if (container) {
+            scrollContainerToElementCenter({
+              container,
+              element: el,
+              topInset: getFindTopInset(),
+            });
+          } else {
+            el.scrollIntoView({ block: "center", inline: "nearest" });
+          }
+          return true;
+        };
+
+        if (loc.kind === "table") {
+          if (shouldVirtualize) {
+            virtualizer.scrollToIndex(loc.segmentIndex, { align: "center" });
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => revealTable(loc.segmentIndex));
+            });
+            return true;
+          }
+          return revealTable(loc.segmentIndex);
+        }
+
+        // text
+        if (shouldVirtualize) {
+          virtualizer.scrollToIndex(loc.segmentIndex, { align: "center" });
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              revealText(loc.segmentIndex, loc.localStart, loc.localEnd);
+            });
+          });
+          return true;
+        }
+        return revealText(loc.segmentIndex, loc.localStart, loc.localEnd);
+      },
+    }),
+    [
+      content,
+      shouldVirtualize,
+      virtualizer,
+      applyTextSelection,
+      scrollContainerRef,
+      getFindTopInset,
+    ]
+  );
+
+  const findSelectionClass = findSelectionActive
+    ? "[&_textarea::selection]:bg-yellow-200 [&_textarea::selection]:text-foreground dark:[&_textarea::selection]:bg-yellow-700/80"
+    : "";
+
+  useEffect(() => {
+    if (!findSelectionActive) return;
+    setSelectedText("");
+    setToolbarPosition(null);
+  }, [findSelectionActive]);
+
   // 如果内容为空，显示单个 Textarea
   if (!content.trim() && segments.length === 0) {
     return (
       <Textarea
+        ref={plainTextareaRef}
         value={content}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={cn(className, textareaClassName)}
+        className={cn(className, textareaClassName, findSelectionClass)}
       />
     );
   }
@@ -1122,10 +1267,11 @@ export default function SegmentedEditor({
   if (segments.length === 0) {
     return (
       <Textarea
+        ref={plainTextareaRef}
         value={content}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={cn(className, textareaClassName)}
+        className={cn(className, textareaClassName, findSelectionClass)}
       />
     );
   }
@@ -1133,7 +1279,7 @@ export default function SegmentedEditor({
   return (
     <>
       <div
-        className={className || ""}
+        className={cn(className || "", findSelectionClass)}
         style={{
           // 内容区域优化：段落间距 1.5rem
           display: "flex",
@@ -1172,7 +1318,16 @@ export default function SegmentedEditor({
           return (
             <div
               key={segmentIndex}
-              ref={shouldVirtualize && vItem ? virtualizer.measureElement : undefined}
+              ref={(el) => {
+                if (el) tableContainerRefs.current.set(segmentIndex, el);
+                else tableContainerRefs.current.delete(segmentIndex);
+                if (shouldVirtualize && vItem) {
+                  virtualizer.measureElement(el);
+                }
+              }}
+              data-index={shouldVirtualize ? segmentIndex : undefined}
+              data-segment-index={segmentIndex}
+              data-segment-type="table"
               className="my-4 border border-border rounded-lg p-4 bg-card relative group shadow-sm hover:shadow-md transition-shadow duration-200"
               style={{
                 ...(wrapStyle ?? {}),
@@ -1425,6 +1580,13 @@ export default function SegmentedEditor({
                   scrollLeft: textarea.scrollLeft,
                 };
                 activeTextareaIndexRef.current = segmentIndex;
+
+                // 查找态：不弹浮动工具栏（避免上翻/下翻布局抖动）
+                if (findSelectionActive) {
+                  setSelectedText("");
+                  setToolbarPosition(null);
+                  return;
+                }
                 
                 // 检测文本选择，显示浮动工具栏
                 const start = textarea.selectionStart;
@@ -1637,8 +1799,8 @@ export default function SegmentedEditor({
         })}
       </div>
 
-      {/* 浮动工具栏 */}
-      {!isMobileWritingMode && (
+      {/* 浮动工具栏（查找态关闭，避免与选区标黄抢布局） */}
+      {!isMobileWritingMode && !findSelectionActive && (
         <FloatingToolbar
           selectedText={selectedText}
           position={toolbarPosition}
@@ -1725,4 +1887,6 @@ export default function SegmentedEditor({
       </Dialog>
     </>
   );
-}
+});
+
+export default SegmentedEditor;

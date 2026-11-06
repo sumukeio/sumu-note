@@ -72,9 +72,13 @@
 - **解决方案**：用户可以在文本段末尾输入 `[[` 来触发链接菜单
 
 ### 2. 查找替换高亮
-- **限制**：由于 `SegmentedEditor` 使用多个 `Textarea`，无法精确高亮匹配项
-- **影响**：查找替换功能正常，但高亮显示可能不精确
-- **解决方案**：查找替换功能仍然可用，只是高亮显示可能不够精确
+- **状态（2026-11-06 / issue011–012 / task023–024）**：定位、当前命中标黄、外层视口跟焦已修
+- **实现**：
+  - `locateMatchInContent` + `revealMatch`；选区黄标（`::selection`）
+  - **跟焦**：`scrollContainerToTextareaOffset` 滚外层容器到选区中线（勿对撑高 textarea `scrollIntoView`）
+  - `focus({ preventScroll: true })`；查找态抑 FloatingToolbar；查找条 sticky
+- **残余限制**：无法同时黄标全部命中；表格命中为滚到表格容器中心
+- **历史**：迁移初期 `editorRef` 未挂载导致定位全断；task023 接线后仍滚错对象 → issue012
 
 ## 测试建议
 

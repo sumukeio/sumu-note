@@ -4,6 +4,40 @@
 > 本文档记录项目的重要更新和修复。**只追加、不覆盖。**  
 > 路径兼容入口：[`docs/CHANGELOG.md`](../CHANGELOG.md)
 
+## 2026-11-06
+
+### 🐛 issue013 编辑中误报「已同步云端更新」导致光标跳文末（task025）
+
+- **现象**：查找关闭时打字偶发光标到文末；几乎同时 Toast「已同步云端更新」
+- **根因**：自己自动保存的 Realtime 回声被当成他端更新 → `setContent` 重解析；旧 save 的 timeout 可能清掉新 save 的 pending
+- **修复**：
+  - `decideRealtimeNoteUpdate`：指纹优先 + 近邻时间戳忽略
+  - pending 清理按 save token；同指纹/近期自写指纹跳过正文覆盖与 Toast
+- **验证**：`note-realtime-filter` 6 passed；type-check 通过
+- **说明**：真·他端更新仍会覆盖并 Toast（预期行为）
+
+### 🐛 issue012 页内查找视口不跟焦 + 上下翻抖动（task024）
+
+- **现象**：task023 后已能标黄/跳转，但视口常停在屏底；上翻/下翻正文抖动
+- **根因**：对撑高且 `overflow-hidden` 的 textarea 做 `scrollIntoView`/`scrollTop`；未滚外层 `editorScrollContainerRef`；`focus` 默认滚焦 + 浮动工具栏抢布局
+- **修复**：
+  - `scrollContainerToTextareaOffset`：按选区 Y 滚外层中线（扣除查找条高度）
+  - `focus({ preventScroll: true })`；查找态关闭 FloatingToolbar
+  - 查找条改为 `sticky` + `data-find-replace-bar`
+- **验证**：`segmented-editor-search` 12 passed（含滚动增量）；type-check 通过
+
+### 🐛 issue011 编辑态页内查找不定位/不标黄（task023）
+
+- **现象**：笔记编辑页 Ctrl+F / 查找面板能出匹配计数，但正文不滚动、不标黄，上翻/下翻无可见反应
+- **根因**：迁入 `SegmentedEditor` 后仍依赖从未挂载的 `editorRef`（单 textarea API）；`matches` 未下传到编辑器
+- **说明**：与 iPhone 8P 双轨降级无关（轻量轨本无查找面板）
+- **修复**：
+  - `locateMatchInContent`：全文偏移 → 文本段本地选区 / 表格段滚动
+  - `SegmentedEditor.revealMatch` + 查找态选区黄标（`::selection`）
+  - `NoteManager.handleFind` 接线；FindReplace 快捷键闭包补全
+- **验证**：`tests/lib/segmented-editor-search.test.ts` 9 passed；`npm run type-check` 通过
+- **文档**：`.phrase/docs/ISSUES.md` issue011；分诊详情含解决方案
+
 ## 2026-09-18
 
 ### 📚 跨项目经验资产独立落盘

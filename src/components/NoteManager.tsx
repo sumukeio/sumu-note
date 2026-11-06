@@ -44,6 +44,8 @@ import { MoveToFolderDialog, MOVE_TARGET_ROOT } from "@/components/MoveToFolderD
 import { getFolderDescendantIds } from "@/lib/folder-utils";
 import { deleteFoldersCascade } from "@/lib/folder-service";
 import { type Match } from "@/lib/search-utils";
+import { buildNoteFingerprint } from "@/lib/note-fingerprint";
+import type { SegmentedEditorHandle } from "@/components/SegmentedEditor";
 import type { Note, FolderItem } from "@/types/note";
 
 import { TouchSensor, MouseSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
@@ -245,7 +247,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   }, [view, folderId, userId]);
 
   // --- [[ 链接补全（useLinkComplete）---
-  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const segmentedEditorRef = useRef<SegmentedEditorHandle | null>(null);
   const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const savedScrollTopRef = useRef<number>(0);
   // 移动端写作模式：键盘弹出 + 正文编辑时，精简布局和底部工具栏
@@ -1133,18 +1135,16 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [view, title, content, handleContentChange, handleInsertTable, toast, undoStack, redoStack, handleRevertToLastSaved, handleRedo]);
 
-  // 处理查找匹配项
+  // 处理查找匹配项：更新状态并通过 SegmentedEditor.revealMatch 定位/选区标黄
   const handleFind = useCallback((newMatches: Match[], newIndex: number) => {
     setMatches(newMatches);
     setCurrentMatchIndex(newIndex);
-    
-    // 定位到匹配项
-    if (newIndex >= 0 && newIndex < newMatches.length && editorRef.current) {
-      const match = newMatches[newIndex];
-      editorRef.current.focus();
-      editorRef.current.setSelectionRange(match.start, match.end);
-      // 滚动到匹配项位置
-      editorRef.current.scrollTop = editorRef.current.scrollHeight;
+
+    if (newIndex >= 0 && newIndex < newMatches.length) {
+      // rAF：等待查找面板状态与段 DOM 稳定后再滚动选区
+      requestAnimationFrame(() => {
+        segmentedEditorRef.current?.revealMatch(newMatches[newIndex]);
+      });
     }
   }, []);
 
@@ -1165,6 +1165,45 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
   // 自动处理云端更新：保存本地更改到版本历史，然后加载云端版本
   const handleAutoSyncFromCloud = async (updatedNote: Note) => {
     if (!updatedNote || !currentNote) return;
+
+    const cloudTagsRaw = updatedNote.tags || "";
+    const cloudFp = buildNoteFingerprint({
+      title: updatedNote.title,
+      content: updatedNote.content,
+      tags: cloudTagsRaw,
+      is_pinned: updatedNote.is_pinned,
+      is_published: updatedNote.is_published,
+    });
+    const localFp = buildNoteFingerprint({
+      title,
+      content,
+      tags: tags.join(","),
+      is_pinned: isPinned,
+      is_published: isPublished,
+    });
+
+    // 与本地编辑态完全一致：只推进时间戳/currentNote，禁止 setContent（避免光标跳文末 + 误报 Toast）
+    if (cloudFp === localFp) {
+      const cloudUpdatedAt = updatedNote.updated_at || new Date().toISOString();
+      saveRefs.lastSavedTimestampRef.current = cloudUpdatedAt;
+      saveRefs.lastSaveTimeRef.current = new Date(cloudUpdatedAt).getTime();
+      setCurrentNote(updatedNote);
+      setSaveStatus("saved");
+      setCloudUpdateNote(null);
+      return;
+    }
+
+    // 仍命中自己刚保存过的指纹（过滤漏网）：同样不覆盖正文
+    for (const fp of saveRefs.recentSelfUpdatesRef.current.values()) {
+      if (fp === cloudFp) {
+        const cloudUpdatedAt = updatedNote.updated_at || new Date().toISOString();
+        saveRefs.lastSavedTimestampRef.current = cloudUpdatedAt;
+        saveRefs.lastSaveTimeRef.current = new Date(cloudUpdatedAt).getTime();
+        setCurrentNote(updatedNote);
+        setCloudUpdateNote(null);
+        return;
+      }
+    }
     
     // 检查是否有未保存的本地更改
     const hasLocalChanges = saveStatus === 'unsaved' || 
@@ -1181,7 +1220,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       }
     }
     
-    // 加载云端最新版本
+    // 加载云端最新版本（确认为他端/外源更新）
     setTitle(updatedNote.title || "");
     setContent(updatedNote.content || "");
     
@@ -1993,6 +2032,7 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
           onExitMobileWritingMode={() => setIsMobileWritingMode(false)}
           editorScrollContainerRef={editorScrollContainerRef}
           savedScrollTopRef={savedScrollTopRef}
+          segmentedEditorRef={segmentedEditorRef}
           moreMenuRef={moreMenuRef}
           moreButtonRef={moreButtonRef}
           moreMenuPortalRef={moreMenuPortalRef}

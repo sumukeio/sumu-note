@@ -186,11 +186,19 @@ export function useNoteSave(
             tags: currentTags.join(","),
             updatedAt: latestUpdatedAt,
           }).catch(() => {});
+          // 保存请求已结束；自更新宽限改靠 lastSaveTime + pending 指纹（见 decideRealtimeNoteUpdate）
+          isSavingRef.current = false;
+          // 仅清理「本次保存」的 pending，避免旧 timeout 清掉更新一次保存的标记（issue013）
+          const clearToken = latestUpdatedAt;
+          const clearFp = pendingSelfFingerprintRef.current;
           setTimeout(() => {
-            isSavingRef.current = false;
-            pendingSelfUpdateRef.current = null;
-            pendingSelfFingerprintRef.current = null;
-          }, 3000);
+            if (pendingSelfUpdateRef.current === clearToken) {
+              pendingSelfUpdateRef.current = null;
+            }
+            if (clearFp && pendingSelfFingerprintRef.current === clearFp) {
+              pendingSelfFingerprintRef.current = null;
+            }
+          }, 12_000);
           createNoteVersion(
             currentNote.id,
             userId,
