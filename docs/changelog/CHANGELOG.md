@@ -4,6 +4,25 @@
 > 本文档记录项目的重要更新和修复。**只追加、不覆盖。**  
 > 路径兼容入口：[`docs/CHANGELOG.md`](../CHANGELOG.md)
 
+## 2026-11-26
+
+### ✨ 完整侧：拖入当前子文件夹 + 拖动删除热区（task002 / task003）
+
+- **范围**：仅完整侧 `NoteManager`/`NoteList`；轻量侧不加拖拽
+- **拖入文件夹**：子文件夹卡片 `useDraggable` + `useDroppable`；松手移入；`wouldCreateFolderCycle` 防循环；Toast；成功退出选中
+- **删除热区**：拖动中隐藏完整 Dock，仅底部删除落点；非拖动多选 Dock 点击保留
+- **手势**：touch 不再 `preventDefault` 阻断 dnd-kit；listeners 始终转发
+- **验证**：`folder-utils` 9 + `client-capability` 12 passed；`type-check` 通过
+- **跨列表外移动**：仍用「移动」弹窗
+
+### 🔧 双轨分流收窄：仅 iOS ≤16 走轻量（task001）
+
+- **现象**：iPhone 12（iOS 18）也被判到轻量侧
+- **根因**：`shouldUseLightFolderNotes` 对凡含 iPhone/iPod 的 UA 一律轻量；UA 无法识别机型
+- **处理**：解析 iOS major；仅 `iPhone|iPod` 且 major ≤ 16 → 轻量；≥ 17 → 完整；解析失败保守轻量
+- **验证**：`tests/lib/client-capability.test.ts` 12 passed
+- **文档**：`docs/guides/IOS_WEBKIT_AUTH_AND_DUAL_TRACK.md`；新 phase `phase-fulltrack-drag-capability-20261126`
+
 ## 2026-11-06
 
 ### 🐛 issue013 编辑中误报「已同步云端更新」导致光标跳文末（task025）

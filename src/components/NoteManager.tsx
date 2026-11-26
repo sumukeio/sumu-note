@@ -41,7 +41,7 @@ import { cacheNoteContent, cacheNotesList, getCachedNotesList, isOnline, onNetwo
 import { NoteList } from "@/components/NoteList";
 import { NoteEditor } from "@/components/NoteEditor";
 import { MoveToFolderDialog, MOVE_TARGET_ROOT } from "@/components/MoveToFolderDialog";
-import { getFolderDescendantIds } from "@/lib/folder-utils";
+import { getFolderDescendantIds, wouldCreateFolderCycle } from "@/lib/folder-utils";
 import { deleteFoldersCascade } from "@/lib/folder-service";
 import { type Match } from "@/lib/search-utils";
 import { buildNoteFingerprint } from "@/lib/note-fingerprint";
@@ -1493,8 +1493,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       onEnterFolder(folder.id, folder.name ?? "");
     }
   };
-  const handleDelete = async () => {
-    const ids = Array.from(selectedIds);
+  const handleDelete = async (idSet: Set<string> = selectedIds) => {
+    const ids = Array.from(idSet);
     // 分离文件夹ID和笔记ID
     const folderIds = ids.filter(id => subFolders.some(f => f.id === id));
     const noteIds = ids.filter(id => notes.some(n => n.id === id));
@@ -1502,7 +1502,8 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
     const deletedNotesCopy = notes.filter(n => noteIds.includes(n.id));
     
     if (showTrash) {
-      // 回收站：永久删除，需要确认
+      // 回收站：永久删除，需要确认（确认框读 selectedIds）
+      setSelectedIds(idSet);
       setBatchDeleteDialogOpen(true);
     } else {
       let cascadeFolderRows: FolderItem[] = [];
@@ -1924,15 +1925,125 @@ export default function NoteManager({ userId, folderId, folderName, onBack, onEn
       }
   };
 
+  /** 拖到当前列表可见子文件夹（task002） */
+  const handleDropOntoFolder = async (
+    targetFolderId: string,
+    idSet: Set<string> = selectedIds
+  ) => {
+    const ids = Array.from(idSet);
+    const folderIds = ids.filter((id) => subFolders.some((f) => f.id === id));
+    const noteIds = ids.filter((id) => notes.some((n) => n.id === id));
+
+    if (folderIds.length === 0 && noteIds.length === 0) {
+      toast({
+        title: "无法移动",
+        description: "请先选中要移动的文件夹或笔记",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (folderIds.includes(targetFolderId)) {
+      toast({
+        title: "移动失败",
+        description: "不能将文件夹移动到自身",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // 循环引用：用当前已知文件夹树；必要时拉全量
+    let foldersForCycle: FolderItem[] = subFolders;
+    if (folderIds.length > 0) {
+      const { data, error } = await supabase
+        .from("folders")
+        .select("*")
+        .eq("user_id", userId);
+      if (!error && data) {
+        foldersForCycle = data as FolderItem[];
+      }
+      for (const fid of folderIds) {
+        if (wouldCreateFolderCycle(foldersForCycle, fid, targetFolderId)) {
+          toast({
+            title: "移动失败",
+            description: "不能将文件夹移动到自己或其子文件夹中",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+    }
+
+    const targetName =
+      subFolders.find((f) => f.id === targetFolderId)?.name || "目标文件夹";
+
+    toast({
+      title: "正在移动…",
+      description: `移入「${targetName}」`,
+      variant: "default",
+      duration: 2000,
+    });
+
+    try {
+      if (folderIds.length > 0) {
+        const { error: folderError } = await supabase
+          .from("folders")
+          .update({ parent_id: targetFolderId })
+          .in("id", folderIds);
+        if (folderError) {
+          toast({
+            title: "移动失败",
+            description: folderError.message || "移动文件夹时出错",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      if (noteIds.length > 0) {
+        await moveNotesToFolder(noteIds, userId, targetFolderId);
+      }
+
+      const parts = [
+        folderIds.length > 0 ? `${folderIds.length} 个文件夹` : "",
+        noteIds.length > 0 ? `${noteIds.length} 篇笔记` : "",
+      ].filter(Boolean);
+
+      toast({
+        title: "移动成功",
+        description: `${parts.join("、")} 已移入「${targetName}」`,
+        variant: "success",
+        duration: 4000,
+      });
+      fetchSubFolders();
+      fetchNotes();
+      exitSelectionMode();
+    } catch (e) {
+      toast({
+        title: "移动失败",
+        description: (e as Error)?.message || "移动时出错",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     setActiveId(null);
-    const { over } = event;
+    const { over, active } = event;
     if (!over) return;
-    if (over.id === 'dock-delete') handleDelete();
-    else if (over.id === 'dock-copy') handleCopy();
-    else if (over.id === 'dock-restore') handleRestore();
-    else if (over.id === 'dock-pin') handlePin(); // 🔥 拖拽置顶
-    else if (over.id === 'dock-move-subfolder') handleMoveSubfoldersClick();
+    const overId = String(over.id);
+    // 合并 active，避免 DragStart 的 setState 尚未提交导致选中为空
+    const dropIds = new Set(selectedIds);
+    dropIds.add(String(active.id));
+    if (overId === "dock-delete") void handleDelete(dropIds);
+    else if (overId === "dock-copy") handleCopy();
+    else if (overId === "dock-restore") handleRestore();
+    else if (overId === "dock-pin") handlePin();
+    else if (overId === "dock-move-subfolder") handleMoveSubfoldersClick();
+    else if (overId.startsWith("folder-")) {
+      const targetFolderId = overId.slice("folder-".length);
+      if (targetFolderId) void handleDropOntoFolder(targetFolderId, dropIds);
+    }
   };
   const handleDragStart = (event: DragStartEvent) => {
     const id = String(event.active.id);

@@ -101,3 +101,17 @@ export function resolveFolderIdsForDelete(
     expandFolderIdsWithDescendants(folders, selectedIds)
   );
 }
+
+/**
+ * 将 draggedFolderId 设为 targetFolderId 的子节点是否会造成循环引用
+ *（目标是自身，或目标是拖动项的后代）。
+ */
+export function wouldCreateFolderCycle(
+  folders: FolderItem[],
+  draggedFolderId: string,
+  targetFolderId: string
+): boolean {
+  if (!draggedFolderId || !targetFolderId) return false;
+  if (draggedFolderId === targetFolderId) return true;
+  return getFolderDescendantIds(folders, draggedFolderId).has(targetFolderId);
+}

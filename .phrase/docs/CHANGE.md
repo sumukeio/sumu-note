@@ -4,13 +4,16 @@
 
 ## 【当前进行阶段】
 
-- [phase-bug-triage-mindnote-sunset-20260916](../phases/phase-bug-triage-mindnote-sunset-20260916/) — Bug 分诊登记 + 思维笔记计划下线（ADR）  
-  - 上一阶段（已完成脚手架，待你确认是否结项归档）：[phase-engineering-governance-20260916](../phases/phase-engineering-governance-20260916/)
+- [phase-fulltrack-drag-capability-20261126](../phases/phase-fulltrack-drag-capability-20261126/) — 完整侧拖放 + iOS 分流收窄  
+  - 上一阶段（未结项）：[phase-bug-triage-mindnote-sunset-20260916](../phases/phase-bug-triage-mindnote-sunset-20260916/) — Bug 分诊 + 思维笔记下线 ADR  
+  - 再上一阶段（脚手架，待确认结项）：[phase-engineering-governance-20260916](../phases/phase-engineering-governance-20260916/)
 
 ## 变更索引（按阶段）
 
 | 日期 | 阶段 | 摘要 | 详情 |
 | :--- | :--- | :--- | :--- |
+| 2026-11-26 | phase-fulltrack-drag-capability-20261126 | task002/003：拖入子文件夹 + 删除热区 | [change](../phases/phase-fulltrack-drag-capability-20261126/change_fulltrack-drag-capability_20261126.md) |
+| 2026-11-26 | phase-fulltrack-drag-capability-20261126 | phase 开启 + task001：iOS≤16 才轻量 | [change](../phases/phase-fulltrack-drag-capability-20261126/change_fulltrack-drag-capability_20261126.md) |
 | 2026-11-06 | phase-bug-triage-mindnote-sunset-20260916 | task025：issue013 Realtime 误覆盖/光标跳文末 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-11-06 | phase-bug-triage-mindnote-sunset-20260916 | task024：issue012 查找视口跟焦/消抖 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |
 | 2026-11-06 | phase-bug-triage-mindnote-sunset-20260916 | task023：issue011 页内查找定位/标黄 | [change](../phases/phase-bug-triage-mindnote-sunset-20260916/change_bug-triage-mindnote-sunset_20260916.md) |

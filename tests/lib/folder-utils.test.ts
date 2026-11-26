@@ -5,6 +5,7 @@ import {
   getFolderDescendantIds,
   orderFolderIdsLeafFirst,
   resolveFolderIdsForDelete,
+  wouldCreateFolderCycle,
 } from "@/lib/folder-utils";
 
 function folder(
@@ -62,5 +63,30 @@ describe("folder-utils delete planning (issue010)", () => {
 
   it("无子文件夹时保持单 id", () => {
     expect(resolveFolderIdsForDelete(tree, ["orphan"])).toEqual(["orphan"]);
+  });
+});
+
+describe("wouldCreateFolderCycle (task002)", () => {
+  const tree: FolderItem[] = [
+    folder("root"),
+    folder("a", "root"),
+    folder("a1", "a"),
+    folder("b", "root"),
+  ];
+
+  it("拖到自身 → true", () => {
+    expect(wouldCreateFolderCycle(tree, "a", "a")).toBe(true);
+  });
+
+  it("拖到自己的后代 → true", () => {
+    expect(wouldCreateFolderCycle(tree, "a", "a1")).toBe(true);
+  });
+
+  it("拖到兄弟 → false", () => {
+    expect(wouldCreateFolderCycle(tree, "a", "b")).toBe(false);
+  });
+
+  it("拖到祖先 → false（变成子树上移）", () => {
+    expect(wouldCreateFolderCycle(tree, "a1", "root")).toBe(false);
   });
 });

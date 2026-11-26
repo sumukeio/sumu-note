@@ -20,9 +20,10 @@
 
 1. **登录放行**：`auth-login-handoff`（session+local 双写）→ 硬跳 `/dashboard`；`getSession` 短重试。
 2. **鉴权壳**：鉴权移出 Suspense；去掉易卡死的 dynamic/`useSearchParams` 深链依赖；已登录访问首页则硬跳 `/dashboard`（已去掉「进入工作台」按钮）。
-3. **双轨文件夹**（`shouldUseLightFolderNotes`）：
-   - **iPhone / iPod** → 增强轻量 `LightFolderNotes`（列表/新建/textarea 编辑、置顶、回收站、移动、子文件夹多选、顶栏多选操作、简化版本历史/缓存）。
-   - **安卓 / PC / iPad** → 完整 `NoteManager`（动态加载）。
+3. **双轨文件夹**（`shouldUseLightFolderNotes`，task001 已收窄）：
+   - **iPhone / iPod 且 iOS major ≤ 16**（锚点：iPhone 8 Plus · iOS 16.3.1）→ 增强轻量 `LightFolderNotes`。
+   - **iPhone / iPod 且 iOS ≥ 17**（含 iPhone 12 + iOS 18）→ 完整 `NoteManager`（动态加载）。
+   - **安卓 / PC / iPad** → 完整 `NoteManager`。
 4. **轻量侧 UX**：多选顶栏四格图标、去掉挡 Toast 的底栏 Dock、chrome `select-none`、正文 `select-text`。
 5. **调试卫生**：`?debugAuth=1` 仅 **sessionStorage**（关标签失效）；**不参与鉴权、不能绕过登录**；排障完用 `/?debugAuth=0`。
 
@@ -33,18 +34,28 @@
 
 ## 能力探测
 
-- 代码：`src/lib/client-capability.ts`
+- 代码：`src/lib/client-capability.ts`（`parseIOSMajorVersion` + `shouldUseLightFolderNotes`）
 - 单测：`tests/lib/client-capability.test.ts`
-- 规则：UA 含 iPhone/iPod → 轻量；其余完整（含 iPad）。
+- 规则（2026-11-26 task001）：
+  - 仅 `iPhone|iPod` 且解析到的 iOS major **≤ 16** → 轻量
+  - `iPhone|iPod` 且 major **≥ 17** → 完整
+  - 非 iPhone/iPod（含 iPad）→ 完整
+  - UA 含 iPhone/iPod 但无法解析版本 → **保守轻量**
+  - UA 无法识别机型，不以型号分流
 
 ## 手测清单（回归）
 
-**iPhone（轻量）**
+**iPhone / iPod · iOS ≤ 16（轻量）**
 
 - [ ] 登录成功硬跳工作台；已登录再开首页也会硬跳进工作台
-- [ ] 进文件夹：可新建笔记/文件夹、打开编辑、保存有 Toast
+- [ ] 进文件夹：轻量列表/新建/textarea；可新建笔记/文件夹、保存有 Toast
 - [ ] 多选：顶栏「已选 N」+ 图标操作；Toast 不被挡
 - [ ] 默认无调试绿条；临时 `/?debugAuth=1` 可见，关标签后消失
+
+**iPhone · iOS ≥ 17（完整，如 iPhone 12 + iOS 18）**
+
+- [ ] 进文件夹为完整 `NoteManager`（分段/格式等），非轻量顶栏
+- [ ] 若出现 `import-timeout`：记录调试条时间线，按 Playbook 归因（本分流不替代拆包）
 
 **安卓 / PC / iPad（完整）**
 

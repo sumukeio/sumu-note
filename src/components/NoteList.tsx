@@ -53,6 +53,15 @@ interface DraggableNoteCardProps {
   onMouseUp?: () => void;
 }
 
+type DndListeners = {
+  onMouseDown?: (e: React.MouseEvent) => void;
+  onMouseMove?: (e: React.MouseEvent) => void;
+  onMouseUp?: (e: React.MouseEvent) => void;
+  onTouchStart?: (e: React.TouchEvent) => void;
+  onTouchMove?: (e: React.TouchEvent) => void;
+  onTouchEnd?: (e: React.TouchEvent) => void;
+};
+
 function DraggableNoteCard({
   note,
   isSelected,
@@ -68,9 +77,10 @@ function DraggableNoteCard({
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: note.id,
-      data: note,
+      data: { type: "note", note },
       disabled: false,
     });
+  const dnd = listeners as DndListeners;
   const style = {
     transform: CSS.Translate.toString(transform),
     opacity: isDragging ? 0 : 1,
@@ -80,26 +90,7 @@ function DraggableNoteCard({
     <div
       ref={setNodeRef}
       style={style}
-      {...(isSelectionMode
-        ? {}
-        : {
-            ...attributes,
-            onMouseDown: (e: React.MouseEvent) => {
-              onMouseDown?.(e);
-              (listeners as { onMouseDown?: (e: React.MouseEvent) => void })
-                ?.onMouseDown?.(e);
-            },
-            onMouseMove: (e: React.MouseEvent) => {
-              onMouseMove?.(e);
-              (listeners as { onMouseMove?: (e: React.MouseEvent) => void })
-                ?.onMouseMove?.(e);
-            },
-            onMouseUp: (e: React.MouseEvent) => {
-              onMouseUp?.();
-              (listeners as { onMouseUp?: (e: React.MouseEvent) => void })
-                ?.onMouseUp?.(e);
-            },
-          })}
+      {...attributes}
       data-note-card
       className={cn(
         "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y",
@@ -109,18 +100,33 @@ function DraggableNoteCard({
         note.is_deleted && "opacity-70 grayscale border-dashed",
         note.is_pinned && !note.is_deleted && "border-l-4 border-l-yellow-500 bg-yellow-500/5"
       )}
+      onMouseDown={(e: React.MouseEvent) => {
+        onMouseDown?.(e);
+        dnd.onMouseDown?.(e);
+      }}
+      onMouseMove={(e: React.MouseEvent) => {
+        onMouseMove?.(e);
+        dnd.onMouseMove?.(e);
+      }}
+      onMouseUp={(e: React.MouseEvent) => {
+        onMouseUp?.();
+        dnd.onMouseUp?.(e);
+      }}
       onTouchStart={(e: React.TouchEvent) => {
         e.stopPropagation();
-        e.preventDefault();
+        // 勿 preventDefault：否则 TouchSensor 无法激活拖拽
         onTouchStart?.(e);
+        dnd.onTouchStart?.(e);
       }}
       onTouchEnd={(e: React.TouchEvent) => {
         e.stopPropagation();
         onTouchEnd?.(e);
+        dnd.onTouchEnd?.(e);
       }}
       onTouchMove={(e: React.TouchEvent) => {
         e.stopPropagation();
         onTouchMove?.(e);
+        dnd.onTouchMove?.(e);
       }}
       onClick={onClick}
     >
@@ -240,6 +246,126 @@ function DroppableDockItem({
       >
         {label}
       </span>
+    </div>
+  );
+}
+
+interface DraggableDroppableFolderCardProps {
+  folder: FolderItem;
+  isSelected: boolean;
+  isSelectionMode: boolean;
+  dropDisabled: boolean;
+  onClick: () => void;
+  onTouchStart?: (e: React.TouchEvent) => void;
+  onTouchEnd?: () => void;
+  onTouchMove?: (e: React.TouchEvent) => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
+  onMouseUp?: () => void;
+}
+
+function DraggableDroppableFolderCard({
+  folder,
+  isSelected,
+  isSelectionMode,
+  dropDisabled,
+  onClick,
+  onTouchStart,
+  onTouchEnd,
+  onTouchMove,
+  onMouseDown,
+  onMouseUp,
+}: DraggableDroppableFolderCardProps) {
+  const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } =
+    useDraggable({
+      id: folder.id,
+      data: { type: "folder", folder },
+    });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `folder-${folder.id}`,
+    disabled: dropDisabled,
+  });
+  const dnd = listeners as DndListeners;
+  const setRefs = (node: HTMLDivElement | null) => {
+    setDragRef(node);
+    setDropRef(node);
+  };
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0 : 1,
+  };
+
+  return (
+    <div
+      ref={setRefs}
+      style={style}
+      {...attributes}
+      data-subfolder-card
+      className={cn(
+        "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y",
+        isOver && !dropDisabled && "bg-blue-100 dark:bg-blue-900/30 border-2 border-blue-500",
+        isSelected
+          ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]"
+          : !isOver && "bg-card border-border hover:bg-accent/50 active:scale-95"
+      )}
+      onMouseDown={(e: React.MouseEvent) => {
+        onMouseDown?.(e);
+        dnd.onMouseDown?.(e);
+      }}
+      onMouseUp={() => {
+        onMouseUp?.();
+      }}
+      onTouchStart={(e: React.TouchEvent) => {
+        e.stopPropagation();
+        onTouchStart?.(e);
+        dnd.onTouchStart?.(e);
+      }}
+      onTouchMove={(e: React.TouchEvent) => {
+        e.stopPropagation();
+        onTouchMove?.(e);
+        dnd.onTouchMove?.(e);
+      }}
+      onTouchEnd={(e: React.TouchEvent) => {
+        e.stopPropagation();
+        onTouchEnd?.();
+        dnd.onTouchEnd?.(e);
+      }}
+      onClick={onClick}
+    >
+      <div>
+        <h3 className="font-bold text-sm mb-1 truncate flex items-center gap-1">
+          <Folder
+            className={cn(
+              "w-4 h-4",
+              isSelected || (isOver && !dropDisabled)
+                ? "text-blue-500 fill-blue-500/20"
+                : "text-yellow-500 fill-yellow-500/20"
+            )}
+          />
+          {folder.name || "无名称"}
+        </h3>
+        <p className="text-xs text-muted-foreground line-clamp-2">
+          {isOver && !dropDisabled ? "松手移入此文件夹" : "文件夹"}
+        </p>
+      </div>
+      <div className="flex justify-between items-center mt-2">
+        <span className="text-[10px] text-muted-foreground">
+          {folder.created_at
+            ? new Date(folder.created_at).toLocaleDateString()
+            : ""}
+        </span>
+        {isSelectionMode ? (
+          <div
+            className={cn(
+              "w-5 h-5 rounded-full flex items-center justify-center",
+              isSelected ? "bg-blue-500" : "border-2 border-zinc-400"
+            )}
+          >
+            {isSelected && <Check className="w-3 h-3 text-white" />}
+          </div>
+        ) : (
+          <Folder className="w-3 h-3 text-muted-foreground/30" />
+        )}
+      </div>
     </div>
   );
 }
@@ -551,79 +677,26 @@ export function NoteList({
               filteredSubFolders.map((folder) => {
                 const isSelected = selectedIds.has(folder.id);
                 return (
-                  <div
+                  <DraggableDroppableFolderCard
                     key={folder.id}
-                    data-subfolder-card
-                    className={cn(
-                      "relative h-36 p-4 rounded-xl border flex flex-col justify-between transition-all select-none cursor-pointer touch-pan-y",
-                      isSelected
-                        ? "bg-accent border-blue-500 shadow-[0_0_0_1px_#3b82f6]"
-                        : "bg-card border-border hover:bg-accent/50 active:scale-95"
-                    )}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onFolderClick(folder);
-                    }}
-                    onTouchStart={(e: React.TouchEvent) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      onTouchStart(folder.id, e);
-                    }}
-                    onTouchMove={(e: React.TouchEvent) => {
-                      e.stopPropagation();
-                      onTouchMove(e);
-                    }}
-                    onTouchEnd={(e: React.TouchEvent) => {
-                      e.stopPropagation();
-                      onTouchEnd();
-                    }}
-                    onMouseDown={(e: React.MouseEvent) => {
+                    folder={folder}
+                    isSelected={isSelected}
+                    isSelectionMode={isSelectionMode}
+                    dropDisabled={
+                      selectedIds.has(folder.id) || activeId === folder.id
+                    }
+                    onClick={() => onFolderClick(folder)}
+                    onTouchStart={(e) => onTouchStart(folder.id, e)}
+                    onTouchMove={onTouchMove}
+                    onTouchEnd={onTouchEnd}
+                    onMouseDown={(e) => {
                       if (!isSelectionMode) {
                         e.stopPropagation();
-                        onTouchStart(folder.id);
+                        onMouseDown(folder.id, e);
                       }
                     }}
-                    onMouseUp={() => onTouchEnd()}
-                    onMouseLeave={() => {}}
-                  >
-                    <div>
-                      <h3 className="font-bold text-sm mb-1 truncate flex items-center gap-1">
-                        <Folder
-                          className={cn(
-                            "w-4 h-4",
-                            isSelected
-                              ? "text-blue-500 fill-blue-500/20"
-                              : "text-yellow-500 fill-yellow-500/20"
-                          )}
-                        />
-                        {folder.name || "无名称"}
-                      </h3>
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        文件夹
-                      </p>
-                    </div>
-                    <div className="flex justify-between items-center mt-2">
-                      <span className="text-[10px] text-muted-foreground">
-                        {folder.created_at
-                          ? new Date(folder.created_at).toLocaleDateString()
-                          : ""}
-                      </span>
-                      {isSelectionMode ? (
-                        <div
-                          className={cn(
-                            "w-5 h-5 rounded-full flex items-center justify-center",
-                            isSelected ? "bg-blue-500" : "border-2 border-zinc-400"
-                          )}
-                        >
-                          {isSelected && (
-                            <Check className="w-3 h-3 text-white" />
-                          )}
-                        </div>
-                      ) : (
-                        <Folder className="w-3 h-3 text-muted-foreground/30" />
-                      )}
-                    </div>
-                  </div>
+                    onMouseUp={onMouseUp}
+                  />
                 );
               })}
 
@@ -674,124 +747,147 @@ export function NoteList({
           )}
         </div>
 
-        <div
-          className={cn(
-            "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300 select-none",
-            "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]",
-            isSelectionMode && selectionDockVisible
-              ? "translate-y-0 opacity-100"
-              : "translate-y-20 opacity-0 pointer-events-none"
-          )}
-          data-selection-dock
-        >
-          <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                exitSelectionMode();
-              }}
-              className="absolute -top-3 -right-3 w-6 h-6 bg-muted rounded-full flex items-center justify-center border border-border shadow-md"
-            >
-              <X className="w-3 h-3" />
-            </button>
-
-            {showTrash ? (
-              <>
-                <DroppableDockItem
-                  id="dock-restore"
-                  icon={RotateCcw}
-                  label="还原"
-                  onClick={onRestore}
-                />
-                <DroppableDockItem
-                  id="dock-delete"
-                  icon={Trash2}
-                  label="彻底删除"
-                  variant="destructive"
-                  onClick={onDelete}
-                />
-              </>
-            ) : (
-              <>
-                {/* 全选 / 取消全选 */}
-                {(() => {
-                  const allIds = [
-                    ...(!showTrash ? filteredSubFolders.map((f) => f.id) : []),
-                    ...filteredNotes.map((n) => n.id),
-                  ];
-                  const allSelected =
-                    allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
-                  return (
-                    <div
-                      className={cn(
-                        "flex flex-col items-center gap-1 transition-all",
-                        allIds.length === 0
-                          ? "opacity-30 grayscale cursor-not-allowed"
-                          : "cursor-pointer hover:scale-110"
-                      )}
-                      onClick={() => {
-                        if (allIds.length === 0) return;
-                        if (allSelected) exitSelectionMode();
-                        else onSelectAll(allIds);
-                      }}
-                      title={allSelected ? "取消全选" : "全选"}
-                    >
-                      <div className="p-2 bg-accent rounded-lg">
-                        <CheckSquare className="w-5 h-5" />
-                      </div>
-                      <span className="text-[10px]">{allSelected ? "取消全选" : "全选"}</span>
-                    </div>
-                  );
-                })()}
-
-                <div
-                  className={cn(
-                    "flex flex-col items-center gap-1 transition-all",
-                    selectedIds.size === 1
-                      ? "cursor-pointer hover:scale-110"
-                      : "opacity-30 grayscale cursor-not-allowed"
-                  )}
-                  onClick={onRename}
-                >
-                  <div className="p-2 bg-accent rounded-lg">
-                    <Pencil className="w-5 h-5" />
-                  </div>
-                  <span className="text-[10px]">重命名</span>
-                </div>
-
-                <DroppableDockItem
-                  id="dock-move-subfolder"
-                  icon={FolderInput}
-                  label="移动"
-                  disabled={selectedIds.size === 0}
-                  onClick={onMoveSubfoldersClick}
-                />
-                <DroppableDockItem
-                  id="dock-pin"
-                  icon={Pin}
-                  label={allSelectedPinned ? "取消置顶" : "置顶"}
-                  variant="pinned"
-                  isActive={allSelectedPinned}
-                  onClick={onPin}
-                />
-                <DroppableDockItem
-                  id="dock-copy"
-                  icon={Copy}
-                  label="复制"
-                  disabled={selectedIds.size > 1}
-                  onClick={onCopy}
-                />
-                <DroppableDockItem
-                  id="dock-delete"
-                  icon={Trash2}
-                  label="删除"
-                  variant="destructive"
-                  onClick={onDelete}
-                />
-              </>
+        {/* 拖动中：仅删除热区（task003）；非拖动多选：完整 Dock 点击 */}
+        {activeId ? (
+          <div
+            className={cn(
+              "fixed left-0 right-0 flex justify-center z-50 transition-all duration-200 select-none",
+              "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]"
             )}
+            data-selection-dock
+            data-drag-delete-zone
+          >
+            <div className="relative bg-background/95 backdrop-blur-md border-2 border-red-500/40 px-10 py-4 rounded-2xl shadow-2xl">
+              <DroppableDockItem
+                id="dock-delete"
+                icon={Trash2}
+                label={showTrash ? "彻底删除" : "删除"}
+                variant="destructive"
+                onClick={onDelete}
+              />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className={cn(
+              "fixed left-0 right-0 flex justify-center z-50 transition-all duration-300 select-none",
+              "bottom-[calc(2rem+env(safe-area-inset-bottom,0px)+var(--vv-bottom-inset,0px))]",
+              isSelectionMode && selectionDockVisible
+                ? "translate-y-0 opacity-100"
+                : "translate-y-20 opacity-0 pointer-events-none"
+            )}
+            data-selection-dock
+          >
+            <div className="relative bg-background/90 backdrop-blur-md border border-border px-4 sm:px-8 py-3 rounded-2xl shadow-2xl flex items-center gap-4 sm:gap-8">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  exitSelectionMode();
+                }}
+                className="absolute -top-3 -right-3 w-6 h-6 bg-muted rounded-full flex items-center justify-center border border-border shadow-md"
+              >
+                <X className="w-3 h-3" />
+              </button>
+
+              {showTrash ? (
+                <>
+                  <DroppableDockItem
+                    id="dock-restore"
+                    icon={RotateCcw}
+                    label="还原"
+                    onClick={onRestore}
+                  />
+                  <DroppableDockItem
+                    id="dock-delete"
+                    icon={Trash2}
+                    label="彻底删除"
+                    variant="destructive"
+                    onClick={onDelete}
+                  />
+                </>
+              ) : (
+                <>
+                  {(() => {
+                    const allIds = [
+                      ...(!showTrash ? filteredSubFolders.map((f) => f.id) : []),
+                      ...filteredNotes.map((n) => n.id),
+                    ];
+                    const allSelected =
+                      allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+                    return (
+                      <div
+                        className={cn(
+                          "flex flex-col items-center gap-1 transition-all",
+                          allIds.length === 0
+                            ? "opacity-30 grayscale cursor-not-allowed"
+                            : "cursor-pointer hover:scale-110"
+                        )}
+                        onClick={() => {
+                          if (allIds.length === 0) return;
+                          if (allSelected) exitSelectionMode();
+                          else onSelectAll(allIds);
+                        }}
+                        title={allSelected ? "取消全选" : "全选"}
+                      >
+                        <div className="p-2 bg-accent rounded-lg">
+                          <CheckSquare className="w-5 h-5" />
+                        </div>
+                        <span className="text-[10px]">
+                          {allSelected ? "取消全选" : "全选"}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  <div
+                    className={cn(
+                      "flex flex-col items-center gap-1 transition-all",
+                      selectedIds.size === 1
+                        ? "cursor-pointer hover:scale-110"
+                        : "opacity-30 grayscale cursor-not-allowed"
+                    )}
+                    onClick={onRename}
+                  >
+                    <div className="p-2 bg-accent rounded-lg">
+                      <Pencil className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px]">重命名</span>
+                  </div>
+
+                  <DroppableDockItem
+                    id="dock-move-subfolder"
+                    icon={FolderInput}
+                    label="移动"
+                    disabled={selectedIds.size === 0}
+                    onClick={onMoveSubfoldersClick}
+                  />
+                  <DroppableDockItem
+                    id="dock-pin"
+                    icon={Pin}
+                    label={allSelectedPinned ? "取消置顶" : "置顶"}
+                    variant="pinned"
+                    isActive={allSelectedPinned}
+                    onClick={onPin}
+                  />
+                  <DroppableDockItem
+                    id="dock-copy"
+                    icon={Copy}
+                    label="复制"
+                    disabled={selectedIds.size > 1}
+                    onClick={onCopy}
+                  />
+                  <DroppableDockItem
+                    id="dock-delete"
+                    icon={Trash2}
+                    label="删除"
+                    variant="destructive"
+                    onClick={onDelete}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        )}
         <DragOverlay>
           {activeId ? (
             <div className="w-40 h-24 bg-accent/90 backdrop-blur border border-blue-500 rounded-xl shadow-2xl p-4 flex flex-col justify-center items-center rotate-3">

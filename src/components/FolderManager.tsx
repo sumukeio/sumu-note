@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Folder, Trash2, FolderInput, X, Check, Loader2, Plus, Pencil } from "lucide-react"; // 🔥 引入 Pencil
 import { supabase } from "@/lib/supabase";
 import { deleteFoldersCascade } from "@/lib/folder-service";
-import { getFolderDescendantIds } from "@/lib/folder-utils";
+import { getFolderDescendantIds, wouldCreateFolderCycle } from "@/lib/folder-utils";
 import type { FolderItem } from "@/types/note";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -311,24 +311,10 @@ export default function FolderManager({ userId, onEnterFolder }: FolderManagerPr
     // 如果拖拽到另一个文件夹上
     if (targetFolderId !== draggedFolderId && targetFolderId.startsWith('folder-')) {
       const actualTargetId = targetFolderId.replace('folder-', '');
-      // 检查不能将文件夹拖到自己或自己的子文件夹中
-      if (actualTargetId === draggedFolderId) return;
-      
-      // 检查循环引用：不能将文件夹拖到自己的子文件夹中
-      const checkCircularReference = (folderId: string, targetId: string): boolean => {
-        const targetFolder = folders.find(f => f.id === targetId);
-        if (!targetFolder) return false;
-        if (targetFolder.parent_id === folderId) return true;
-        if (targetFolder.parent_id) {
-          return checkCircularReference(folderId, targetFolder.parent_id);
-        }
-        return false;
-      };
-      
-      if (checkCircularReference(draggedFolderId, actualTargetId)) {
+      if (wouldCreateFolderCycle(folders, draggedFolderId, actualTargetId)) {
         toast({
           title: "移动失败",
-          description: "不能将文件夹移动到自己的子文件夹中",
+          description: "不能将文件夹移动到自己或其子文件夹中",
           variant: "destructive",
         });
         return;
